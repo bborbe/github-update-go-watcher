@@ -13,6 +13,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 - feat: add pkg/filter decision chain (RepoAllowlistFilter, GoModPresentFilter, GoModParsableFilter, GoBehindFilter, AutoUpdateFilter, SHAUnchangedFilter) with TaskCreationFilter interface and Candidate type
 - feat: add pkg/cursor for persisted-memory LoadCursor/SaveCursor with atomic write via temp file + rename
 - feat: add pkg/cursorreader adapter bridging Cursor to filter.CursorReader without import cycle
+- feat: add pkg/candidate (per-repo observation), pkg/taskbuilder (frozen CreateTaskCommand contract), pkg/taskpublisher (send + counter), and pkg/watcher (full scan cycle orchestration)
 
 ## v0.0.1
 

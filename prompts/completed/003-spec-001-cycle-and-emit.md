@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: ["001"]
+summary: Added cycle orchestrator (pkg/watcher.go), per-repo Candidate type, frozen emit contract (pkg/taskbuilder.go), TaskPublisher (pkg/taskpublisher.go), GitHubClient interface (pkg/githubclient.go), and comprehensive tests covering all AC5-AC12 requirements
+execution_id: github-update-go-watcher-goupdate-exec-003-spec-001-cycle-and-emit
+dark-factory-version: dev
 created: "2026-08-16T12:53:45Z"
 queued: "2026-08-16T13:15:33Z"
+started: "2026-08-16T13:21:45Z"
+completed: "2026-08-16T13:44:45Z"
 ---
 
 <summary>
