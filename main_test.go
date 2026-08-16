@@ -7,6 +7,7 @@
 package main_test
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/gexec"
+
+	"github.com/bborbe/github-update-go-watcher/pkg"
 )
 
 var _ = Describe("Main", func() {
@@ -21,6 +24,18 @@ var _ = Describe("Main", func() {
 		var err error
 		_, err = gexec.Build(".", "-mod=mod", "-buildvcs=false")
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("defaults the cursor path to the PVC mount point", func() {
+		// pkg is imported to access DefaultCursorPath
+		Expect(pkg.DefaultCursorPath).To(Equal("/data/cursor.json"))
+	})
+
+	It("does not declare the removed scaffold flags", func() {
+		data, err := os.ReadFile("main.go")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(data)).NotTo(ContainSubstring("DATADIR"))
+		Expect(string(data)).NotTo(ContainSubstring("BATCH_SIZE"))
 	})
 })
 

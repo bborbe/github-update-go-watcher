@@ -10,8 +10,11 @@ run:
 	-sentry-dsn="$(shell teamvault-url --teamvault-config ~/.teamvault.json --teamvault-key=${SENTRY_DSN_KEY})" \
 	-listen="localhost:${SKELETON_PORT}" \
 	-kafka-brokers="${KAFKA_BROKERS}" \
-	-datadir="data" \
-	-batch-size="100" \
+	-stage="${STAGE}" \
+	-owner="${OWNER}" \
+	-repo-allowlist="${REPO_ALLOWLIST}" \
+	-cursor-path="data/cursor.json" \
+	-poll-interval="10m" \
 	-v=2
 
 deps:

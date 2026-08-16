@@ -16,7 +16,7 @@ This is **Layer 2** of the Go-update pipeline:
 
 A repo is only acted on when **both** hold:
 
-1. **`REPO_ALLOWLIST`** (env, host-qualified, `lib/repoallowlist`) — the operator's scope. Empty means allow-all within `OWNER`.
+1. **`REPO_ALLOWLIST`** (env, host-qualified, validated via `github.com/bborbe/maintainer/repoallowlist`) — the operator's scope. Empty means allow-all within `OWNER`.
 2. **`.maintainer.yaml: goUpdate.autoUpdate: true`** in the target repo — the repo owner's consent.
 
 The second is a **trust gate**: a repo with no `.maintainer.yaml`, no `goUpdate:` section, or `autoUpdate` absent/false is skipped. Opt-in, never opt-out — this watcher causes code to be committed to the target repo, so it does not act without explicit consent.
@@ -35,4 +35,107 @@ Poll-primary, on its own interval — no dependency on Layer 1's signal for corr
 
 ## Status
 
-Scaffolded. Watcher logic not yet implemented — see the spec in `specs/`.
+Implemented. Not yet deployed — deployment (Helm/`quant` chart wiring) is a separate step outside this repo. Once deployed, the binary watches `OWNER` for Go repos behind the current stable release and publishes `CreateTaskCommand` to Kafka on a 10-minute interval (configurable via `POLL_INTERVAL`). Forced scans available via `POST /trigger`.
+
+## Environment variables
+
+| Name | Required | Default | Meaning |
+|---|---|---|---|
+| `OWNER` | yes | — | GitHub owner/org to scan (e.g. `bborbe`) |
+| `STAGE` | yes | — | Deployment stage (`dev`\|`prod`), stamped on every emitted task |
+| `KAFKA_BROKERS` | yes | — | Comma-separated list of Kafka brokers |
+| `REPO_ALLOWLIST` | no | empty (allow-all) | Comma-separated host-qualified repo allowlist (`github.com/owner/repo`); empty = allow-all within `OWNER` |
+| `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the `quant` Helm chart) |
+| `POLL_INTERVAL` | no | `10m` | Poll interval as a Go duration (e.g. `5m`, `1h`) |
+| `TOPIC_PREFIX` | no | empty | Kafka topic prefix for CQRS topic construction |
+| `LISTEN` | no | `:9090` | HTTP listen address |
+| `APP_ID` | yes* | — | GitHub App ID |
+| `INSTALLATION_ID` | yes* | — | GitHub App Installation ID |
+| `PEM_KEY` | yes* | — | GitHub App PEM key (populated from a k8s Secret; never logged) |
+| `SENTRY_DSN` | no | — | Sentry DSN for error reporting |
+
+\* `APP_ID`, `INSTALLATION_ID`, and `PEM_KEY` are each individually marked `required:"false"` on the binary's argument struct (so the process can start and print `--help` without them), but `ResolveGitHubClient` refuses to run without all three set — the binary fails at startup with "GitHub App credentials not configured" if any is missing. Set all three or none.
+
+## Metrics
+
+All metrics are prefixed with `github_update_go_watcher_`.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `poll_cycle_total` | `result` | Total cycles by outcome. Labels: `success`, `rate_limited`, `github_error`, `go_version_error` |
+| `published_total` | `status` | Tasks published to Kafka. Labels: `create`, `error` |
+| `repos_scanned_total` | — | Total repos scanned across all cycles |
+| `filter_skipped_total` | `reason` | Repos skipped by the filter chain. Labels: see Skip reasons |
+
+## Skip reasons
+
+| Label | What triggers it |
+|---|---|
+| `scope` | Repo not in the `REPO_ALLOWLIST` |
+| `no_gomod` | Repo has no `go.mod` file |
+| `gomod_unparsable` | `go.mod` exists but its go directive is unreadable |
+| `go_current` | Declared Go version is at or ahead of stable |
+| `auto_update_disabled` | Repo has no `goUpdate.autoUpdate: true` in `.maintainer.yaml` |
+| `sha_unchanged` | Repo HEAD SHA has not changed since last successful cycle (not evaluated on forced cycles) |
+
+## Emitted task contract
+
+**Frozen against the shipped `github-update-go-agent` consumer — changing any of this breaks it.**
+
+The watcher publishes one `CreateTaskCommand` per qualifying repo. The command's frontmatter carries exactly these twelve keys:
+
+| Key | Value |
+|---|---|
+| `task_type` | `github-update-go` |
+| `assignee` | `github-update-go-agent` (never `go-update-agent` — that agent does not exist) |
+| `phase` | `planning` |
+| `status` | `in_progress` |
+| `stage` | `<STAGE>` (`dev` or `prod`) |
+| `task_identifier` | deterministic UUID5 derived from `(owner, repo, HEAD SHA)` |
+| `title` | `Update Go <owner>-<repo> <sha[:7]>` (dash, not slash — the vault filename is derived from this verbatim) |
+| `repo` | `<owner>/<repo>` |
+| `clone_url` | `git@github.com:<owner>/<repo>.git` |
+| `ref` | full HEAD SHA |
+| `current_go` | normalised three-part current Go version (e.g. `1.24.0`) |
+| `latest_go` | current stable three-part Go version (e.g. `1.26.6`) |
+
+Body (byte-for-byte, two spaces either side of the middot `·`):
+```markdown
+# Update Go: <owner>/<repo>
+
+**Current Go:** <X.Y.Z>  ·  **Latest Go:** <X.Y.Z>
+**HEAD:** <sha[:7]>
+**Repo:** [<owner>/<repo>](https://github.com/<owner>/<repo>)
+```
+
+## Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/healthz` | GET | Liveness probe — always 200 OK |
+| `/readiness` | GET | Readiness probe — always 200 OK |
+| `/metrics` | GET | Prometheus scrape endpoint |
+| `/trigger` | POST | Force an immediate poll cycle. `?force=<bool>` (default false) controls whether SHA-unchanged repos are re-evaluated. Returns 202 Accepted or 409 Conflict if a cycle is already running |
+| `/setloglevel/{level}` | GET | Raise glog verbosity to `level`, auto-resets after 5 minutes |
+| `/gc` | GET | Trigger Go garbage collection |
+| `/testloglevel` | GET | Emit test log lines at every verbosity level |
+| `/sentryalert` | POST | Send a test event to Sentry |
+
+## Forced-emit end-to-end verification
+
+To manually trigger a scan and verify the full detect→Kafka→controller→vault-file path:
+
+1. Confirm the target repo is listed in `REPO_ALLOWLIST` (or `REPO_ALLOWLIST` is empty) and carries `goUpdate.autoUpdate: true` in `.maintainer.yaml`.
+2. `curl -X POST '<admin-url>/trigger?force=true'` — expect `202 {"status":"accepted"}`.
+3. If a cycle is already running, the endpoint returns `409 Conflict` — wait for the running cycle to complete and retry.
+4. Confirm `github_update_go_watcher_published_total{status="create"}` incremented on `GET /metrics`.
+5. Confirm the vault task file appeared at `Update Go <owner>-<repo> <sha[:7]>.md`.
+
+This verifies the complete path that unit tests cannot reach: GitHub API → filter chain → Kafka → command consumer → vault file write.
+
+## Development
+
+```bash
+make test      # Run tests
+make precommit # Full development workflow
+```
