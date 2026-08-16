@@ -8,6 +8,11 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix(build): publish semver-tagged images and drop the in-repo k8s manifests. The scaffold's `Makefile.docker` tagged by `$(BRANCH)` (`:dev`/`:prod`) and `Makefile.k8s` applied `k8s/*.yaml` with `kubectl` — neither fits how this unit is actually deployed, which is a pinned OCI Helm chart (`watcher.tag: v0.1.0`) mirrored into the quant registry, matching the three sibling watchers. A branch-tagged image cannot be pinned by version, and the `k8s/` manifests would have deployed a second unmanaged copy alongside the Helm release. Also passes `BUILD_GIT_VERSION` to the build, which the sibling's Makefile omits despite the Dockerfile consuming it for `org.opencontainers.image.version`
+- fix(build): bump the Dockerfile build stage `golang:1.26.5` → `golang:1.26.6` to match `go.mod`. Same defect that made github-releaser-agent v0.4.1 unbuildable — `make precommit` compiles with the host toolchain, so only the container pins a Go version and the drift is invisible until an operator runs `make buca`
+
 ## v0.1.0
 
 - feat: add pkg/githubclient GitHubClient interface backed by go-github/v84, with ListRepos (paginated), GetHeadSHA, GetGoMod (1 MiB cap), and GetMaintainerConfig; ErrRateLimited sentinel for rate-limit signals
