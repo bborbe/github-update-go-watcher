@@ -10,6 +10,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+- feat: add pkg/filter decision chain (RepoAllowlistFilter, GoModPresentFilter, GoModParsableFilter, GoBehindFilter, AutoUpdateFilter, SHAUnchangedFilter) with TaskCreationFilter interface and Candidate type
+- feat: add pkg/cursor for persisted-memory LoadCursor/SaveCursor with atomic write via temp file + rename
+- feat: add pkg/cursorreader adapter bridging Cursor to filter.CursorReader without import cycle
+
 ## v0.0.1
 
 - initial scaffold from `go-skeleton`

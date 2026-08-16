@@ -9,6 +9,7 @@ require (
 	github.com/bborbe/kafka v1.25.7
 	github.com/bborbe/kv v1.21.9
 	github.com/bborbe/log v1.6.21
+	github.com/bborbe/maintainer v0.48.1
 	github.com/bborbe/metrics v0.5.11
 	github.com/bborbe/run v1.9.34
 	github.com/bborbe/sentry v1.9.24

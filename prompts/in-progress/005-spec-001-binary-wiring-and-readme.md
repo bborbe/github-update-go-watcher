@@ -1,7 +1,8 @@
 ---
+status: approved
 spec: ["001"]
-status: draft
 created: "2026-08-16T12:53:45Z"
+queued: "2026-08-16T13:17:03Z"
 ---
 
 <summary>
@@ -20,7 +21,7 @@ Wire the watcher into the binary: environment binding, the poll loop, the single
 </objective>
 
 <context>
-Read `CLAUDE.md` (repo root) and `docs/dod.md`.
+Read `docs/dod.md`.
 
 Read these coding plugin docs before writing code:
 - `/home/node/.claude/plugins/marketplaces/coding/docs/go-k8s-binary-conventions.md`
@@ -256,9 +257,31 @@ func CreateTriggerHandler(
 ) http.Handler {
 	return libhttp.NewJSONErrorHandler(handler.NewTriggerHandler(ctx, watcher, gate))
 }
+
+// CreateRouter builds the full HTTP route table. main.go's createHTTPServer
+// and main_http_test.go both call this — the endpoint-contract test MUST
+// exercise the same registration this function produces, not a hand-copied
+// route table, or a route added/removed only in main.go would go undetected.
+func CreateRouter(
+	ctx context.Context,
+	triggerHandler http.Handler,
+	sentryClient libsentry.Client,
+) *mux.Router {
+	router := mux.NewRouter()
+	router.Path("/healthz").Handler(libhttp.NewPrintHandler("OK"))
+	router.Path("/readiness").Handler(libhttp.NewPrintHandler("OK"))
+	router.Path("/metrics").Handler(promhttp.Handler())
+	router.Path("/trigger").Handler(triggerHandler)
+	router.Path("/setloglevel/{level}").
+		Handler(log.NewSetLoglevelHandler(ctx, log.NewLogLevelSetter(2, 5*time.Minute)))
+	router.Path("/gc").Handler(libhttp.NewGarbageCollectorHandler())
+	router.Path("/testloglevel").Handler(CreateTestLoglevelHandler())
+	router.Path("/sentryalert").Handler(CreateSentryAlertHandler(sentryClient))
+	return router
+}
 ```
 
-Add `pkg/factory/factory_test.go` (`package factory_test`, the suite file already exists) asserting `CreateStaticFilters(nil)` returns a chain that skips a Candidate with `GoModPresent:false` for reason `"no_gomod"` and passes a fully-qualifying Candidate, and that `CreateGoDevHTTPClient().Timeout` is non-zero.
+Add `pkg/factory/factory_test.go` (`package factory_test`, the suite file already exists) asserting `CreateStaticFilters(nil)` returns a chain that skips a `filter.Candidate` (the filter package's own type, not `pkg.Candidate`) with `GoModPresent:false` for reason `"no_gomod"` and passes a fully-qualifying `filter.Candidate`, and that `CreateGoDevHTTPClient().Timeout` is non-zero.
 
 ### 5. `main.go` — rewrite
 
@@ -299,7 +322,7 @@ type application struct {
 
 1. `libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)`.
 2. `pollInterval, err := time.ParseDuration(a.PollInterval)`; on error `return errors.Wrapf(ctx, err, "parse poll interval %q", a.PollInterval)`.
-3. `allowlist := filter.ParseRepoAllowlist(a.RepoAllowlist)`; validate it with `repoallowlist.Validate(ctx, allowlist)` and return a wrapped error on failure so a typo'd entry fails at start rather than silently widening or narrowing scope. Log the entry count (`glog.V(2).Infof("repo-allowlist count=%d", len(allowlist))`); when the count is 0 log that allow-all applies within the owner.
+3. `allowlist := filter.ParseRepoAllowlist(a.RepoAllowlist)`; validate it with `repoallowlist.Validate(ctx, allowlist)` (import `"github.com/bborbe/maintainer/repoallowlist"` — NOT `lib/repoallowlist`) and return a wrapped error on failure so a typo'd entry fails at start rather than silently widening or narrowing scope. Log the entry count (`glog.V(2).Infof("repo-allowlist count=%d", len(allowlist))`); when the count is 0 log that allow-all applies within the owner.
 4. `httpClient, err := auth.ResolveGitHubClient(ctx, auth.Credentials{AppID: a.AppID, InstallationID: a.InstallationID, PEMKey: []byte(a.PEMKey)})`; wrap errors; `defer httpClient.CloseIdleConnections()`.
 5. `syncProducer, err := libkafka.NewSyncProducerWithName(ctx, libkafka.ParseBrokersFromString(a.KafkaBrokers), serviceName)`; wrap errors; `defer` a close whose error is logged with `glog.Warningf("close kafka sync producer: %v", cerr)`.
 6. `metrics := pkg.NewMetrics(nil)` (nil → `prometheus.DefaultRegisterer`, which `promhttp.Handler()` serves).
@@ -351,20 +374,7 @@ func (a *application) pollLoop(
 }
 ```
 
-`createHTTPServer(sentryClient libsentry.Client) run.Func` — routes, exactly:
-
-```go
-router := mux.NewRouter()
-router.Path("/healthz").Handler(libhttp.NewPrintHandler("OK"))
-router.Path("/readiness").Handler(libhttp.NewPrintHandler("OK"))
-router.Path("/metrics").Handler(promhttp.Handler())
-router.Path("/trigger").Handler(a.TriggerHandler)
-router.Path("/setloglevel/{level}").
-	Handler(log.NewSetLoglevelHandler(ctx, log.NewLogLevelSetter(2, 5*time.Minute)))
-router.Path("/gc").Handler(libhttp.NewGarbageCollectorHandler())
-router.Path("/testloglevel").Handler(factory.CreateTestLoglevelHandler())
-router.Path("/sentryalert").Handler(factory.CreateSentryAlertHandler(sentryClient))
-```
+`createHTTPServer(sentryClient libsentry.Client) run.Func` builds its router via `factory.CreateRouter(ctx, a.TriggerHandler, sentryClient)` (defined in step 4) and wraps it with `libhttp.NewServer(a.Listen, router).Run`. Do NOT re-declare the route table inline in `main.go` — `factory.CreateRouter` is the single source of the route table, so `main_http_test.go` (step 8) exercises the exact same registration the running binary uses.
 
 `/resetdb` and `/resetbucket/{BucketName}` are **removed**, along with the `libboltkv`/`libkv` imports and the `db` parameter. An unregistered path returns 404 from mux, which is the documented contract.
 
@@ -373,7 +383,7 @@ Do NOT add `/resetcursor` or `/setcursor` endpoints — spec Non-goal: no cursor
 ### 6. Makefile and example.env
 
 - `Makefile` `run` target: remove `-datadir="data"` and `-batch-size="100"` (those flags no longer exist and the target would fail at startup). Add `-stage="${STAGE}"`, `-owner="${OWNER}"`, `-repo-allowlist="${REPO_ALLOWLIST}"`, `-cursor-path="data/cursor.json"`, `-poll-interval="10m"`. Keep the target name, the `-sentry-dsn` teamvault line, `-listen`, `-kafka-brokers` and `-v=2` as they are. Do not rename, add, or delete any Makefile target.
-- `example.env`: add `export OWNER=bborbe`, `export REPO_ALLOWLIST=`, `export STAGE=dev`. The `formatenv` target sorts this file — keep it sorted so `make formatenv` is a no-op.
+- `example.env`: add `export OWNER=bborbe`, `export REPO_ALLOWLIST=`, `export STAGE=dev`. If the file is not currently alphabetically sorted, that is pre-existing and out of scope here; just insert the new lines in the file's existing order/convention rather than reordering unrelated lines.
 
 ### 7. `main_test.go`
 
@@ -398,7 +408,7 @@ It("does not declare the removed scaffold flags", func() {
 
 ### 8. `main_http_test.go` — endpoint contract
 
-New file, `package main_test`. Build the same router shape as `createHTTPServer` inside the test (mux router + the eight routes above, with a `factory.CreateTriggerHandler` over a `mocks.Watcher` and a real `pkg.NewCycleGate()`), serve it with `httptest.NewServer`, and assert:
+New file, `package main_test`. Build the router via `factory.CreateRouter(ctx, factory.CreateTriggerHandler(ctx, watcherFake, gate), sentryClient)` — the SAME function `createHTTPServer` calls in production — with a `mocks.Watcher` and a real `pkg.NewCycleGate()`. Do NOT hand-copy the route registrations into the test; calling `factory.CreateRouter` is what makes this an integration test of the production dispatch path rather than a test of a parallel copy. Serve it with `httptest.NewServer` and assert:
 
 - `GET /healthz` → 200
 - `GET /readiness` → 200
@@ -413,6 +423,8 @@ New file, `package main_test`. Build the same router shape as `createHTTPServer`
 - `POST /trigger?force=true&repo=attacker/repo` → 202, and the fake watcher's recorded `Poll` calls show force `true`; assert no repo string reaches the watcher (the `Poll` signature carries no repo, which is the structural guarantee — state it in a comment).
 - `GET /setloglevel/2` → 200
 - `GET /resetdb` → 404
+
+Each HTTP response's body must be closed (`defer resp.Body.Close()` or equivalent) — `bodyclose` is enabled in `.golangci.yml` and, unlike `gosec`/`errcheck`/`dupl`, is NOT in the test-path exclusion list.
 
 ### 9. `README.md`
 
@@ -476,9 +488,9 @@ grep -rn "boltkv\|bborbe/kv\"" --include=*.go .
 Expect zero matches.
 
 ```
-grep -rn "resetdb\|resetbucket\|DATADIR\|BATCH_SIZE" --include=*.go .
+grep -rn "resetdb\|resetbucket\|DATADIR\|BATCH_SIZE" --include='*.go' . | grep -v '_test\.go:'
 ```
-Expect zero matches.
+Expect zero matches. (`main_test.go` and `main_http_test.go` deliberately reference `DATADIR`/`BATCH_SIZE`/`resetdb` to prove they are gone / return 404 — this checks production code only.)
 
 ```
 grep -rn "github-update-go-agent" --include=*.go .

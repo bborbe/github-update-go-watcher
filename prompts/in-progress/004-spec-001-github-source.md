@@ -1,7 +1,8 @@
 ---
+status: approved
 spec: ["001"]
-status: draft
 created: "2026-08-16T12:53:45Z"
+queued: "2026-08-16T13:16:11Z"
 ---
 
 <summary>
@@ -262,21 +263,36 @@ Implementation:
 - Complete → log `glog.Infof("watcher auth mode=github-app app_id=%d installation_id=%d", creds.AppID, creds.InstallationID)` (App ID and installation ID are public; the PEM is not logged at any level), then `githubapp.NewClient(ctx, githubapp.Config{AppID: creds.AppID, InstallationID: creds.InstallationID, PEM: creds.PEMKey})`, wrapping any error with `errors.Wrap(ctx, err, "create github app client")`.
 - Neither → `errors.Errorf(ctx, "watcher auth: GitHub App credentials not configured — set APP_ID, INSTALLATION_ID, and PEM_KEY")`.
 
-Add `pkg/auth/auth_suite_test.go` with a Ginkgo `RunSpecs` for `package auth_test`, mirroring the shape of `pkg/pkg_suite_test.go` (`time.Local = time.UTC`, `format.TruncatedDiff = false`, 60s suite timeout). Do NOT add a `//go:generate` counterfeiter directive to this new suite file — the one in `pkg/pkg_suite_test.go` and `main_test.go` already cover the module.
+Add `pkg/auth/auth_suite_test.go` with a Ginkgo `RunSpecs` for `package auth_test`, mirroring the shape of `pkg/pkg_suite_test.go` (`time.Local = time.UTC`, `format.TruncatedDiff = false`, 60s suite timeout). Counterfeiter's generate mode is per-directory and non-recursive, so every package with mocks needs its own bootstrap line — mirror the existing convention (`pkg/pkg_suite_test.go`, `pkg/factory/factory_suite_test.go`, `pkg/handler/handler_suite_test.go` each carry one) by adding, immediately above `func TestAuth(...)`:
+
+```go
+//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.12.2 -generate
+```
+
+`pkg/auth` declares no interfaces in this prompt, so this generates nothing today, but omitting it means the first future interface added to this package silently never gets a mock.
 
 ### 4. Tests
 
-**`pkg/githubclient_test.go`** (`package pkg_test`) — drive `NewGitHubClient` against an `httptest.NewServer` whose handler routes by `r.URL.Path`, and point the client at it. Because `gogithub.NewClient(httpClient)` targets api.github.com, use an `http.Client` whose `Transport` is a `http.RoundTripper` that rewrites the request URL host/scheme to the test server — implement a small unexported `rewriteTransport` in the test file:
+**`pkg/githubclient_test.go`** (`package pkg_test`) — drive `NewGitHubClient` against an `httptest.NewServer` whose handler routes by `r.URL.Path`, and point the client at it. Because `gogithub.NewClient(httpClient)` targets api.github.com, add an unexported export-test helper (mirroring the sibling `github-release-watcher`'s proven `pkg/githubclient_export_test.go` pattern) that reaches into the concrete `*githubClient` and overrides its `gogithub.Client.BaseURL`:
 
 ```go
-type rewriteTransport struct{ base *url.URL }
+// pkg/githubclient_export_test.go
+package pkg
 
-func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.URL.Scheme = t.base.Scheme
-	req.URL.Host = t.base.Host
-	return http.DefaultTransport.RoundTrip(req)
+import "net/url"
+
+// SetBaseURL points c at a test server. Test-only.
+func SetBaseURL(c GitHubClient, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	c.(*githubClient).client.BaseURL = u
+	return nil
 }
 ```
+
+Then in `pkg/githubclient_test.go`: `client := pkg.NewGitHubClient(server.Client()); Expect(pkg.SetBaseURL(client, server.URL+"/")).To(Succeed())`. This uses the client's real transport rather than a hand-rolled `RoundTripper`.
 
 Cover:
 - `ListRepos` over two pages (first response sets a `Link: <...>; rel="next"` header so `resp.NextPage` is non-zero) returns the union.
