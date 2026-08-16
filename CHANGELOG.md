@@ -10,6 +10,8 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+- feat: add pkg/githubclient GitHubClient interface backed by go-github/v84, with ListRepos (paginated), GetHeadSHA, GetGoMod (1 MiB cap), and GetMaintainerConfig; ErrRateLimited sentinel for rate-limit signals
+- feat: add pkg/auth ResolveGitHubClient for GitHub App installation token resolution with partial-config validation (PEM never logged)
 - feat: add pkg/filter decision chain (RepoAllowlistFilter, GoModPresentFilter, GoModParsableFilter, GoBehindFilter, AutoUpdateFilter, SHAUnchangedFilter) with TaskCreationFilter interface and Candidate type
 - feat: add pkg/cursor for persisted-memory LoadCursor/SaveCursor with atomic write via temp file + rename
 - feat: add pkg/cursorreader adapter bridging Cursor to filter.CursorReader without import cycle

@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: ["001"]
+summary: Added GitHubClient interface in pkg/ with go-github/v84, pkg/auth for GitHub App credential resolution, and comprehensive tests; updated watcher.go and watcher_test.go to match value-type return signature.
+execution_id: github-update-go-watcher-goupdate-exec-004-spec-001-github-source
+dark-factory-version: dev
 created: "2026-08-16T12:53:45Z"
 queued: "2026-08-16T13:16:11Z"
+started: "2026-08-16T13:44:47Z"
+completed: "2026-08-16T13:59:25Z"
 ---
 
 <summary>

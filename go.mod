@@ -18,6 +18,7 @@ require (
 	github.com/bborbe/time v1.27.8
 	github.com/getsentry/sentry-go v0.48.0
 	github.com/golang/glog v1.2.5
+	github.com/google/go-github/v84 v84.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/onsi/ginkgo/v2 v2.32.1
@@ -38,6 +39,7 @@ require (
 	github.com/bborbe/validation v1.4.18 // indirect
 	github.com/bborbe/vault-cli v0.68.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
@@ -59,8 +61,10 @@ require (
 	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect

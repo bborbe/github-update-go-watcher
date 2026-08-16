@@ -201,7 +201,7 @@ func (w *watcher) gatherCandidate(
 		Repo:       repo,
 		HeadSHA:    headSHA,
 		LatestGo:   latestGo,
-		AutoUpdate: cfg != nil && cfg.GoUpdate.AutoUpdate,
+		AutoUpdate: cfg.GoUpdate.AutoUpdate,
 	}
 	if goModContent != nil {
 		candidate.GoModPresent = true
