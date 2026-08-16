@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.1.0
 
 - feat: add pkg/githubclient GitHubClient interface backed by go-github/v84, with ListRepos (paginated), GetHeadSHA, GetGoMod (1 MiB cap), and GetMaintainerConfig; ErrRateLimited sentinel for rate-limit signals
 - feat: add pkg/auth ResolveGitHubClient for GitHub App installation token resolution with partial-config validation (PEM never logged)
