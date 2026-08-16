@@ -3,7 +3,11 @@ include Makefile.precommit
 include Makefile.docker
 include example.env
 
-SERVICE = bborbe/github-update-go-watcher
+# Bare name: Makefile.docker prefixes it with bborbe/ itself, matching the other
+# watcher repos. Deployment is NOT in this repo — the image is published to
+# Docker Hub by an operator running `make buca`, then mirrored and pinned by the
+# Helm release in quant/.
+SERVICE = github-update-go-watcher
 
 run:
 	@go run -mod=mod main.go \
