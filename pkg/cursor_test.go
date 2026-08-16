@@ -52,11 +52,34 @@ var _ = Describe("LoadCursor", func() {
 		Expect(c.Repos).To(BeEmpty())
 	})
 
-	It("non-json returns error", func() {
+	It("non-json cold-starts instead of erroring", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		Expect(os.WriteFile(path, []byte("not json"), 0600)).To(Succeed())
+		c, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.Repos).To(BeEmpty())
+	})
+
+	It("non-json preserves the bad file as .corrupt", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
 		Expect(os.WriteFile(path, []byte("not json"), 0600)).To(Succeed())
 		_, err := pkg.LoadCursor(ctx, path)
-		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
+		saved, err := os.ReadFile(path + ".corrupt")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(saved)).To(Equal("not json"))
+	})
+
+	It("non-json does not wedge the next cycle", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		Expect(os.WriteFile(path, []byte("not json"), 0600)).To(Succeed())
+		_, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		// The whole point of the change: a second cycle must also succeed.
+		// The old behaviour returned an error here forever, because nothing
+		// rewrites a cursor file that fails to load.
+		_, err = pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
 	})
 })
 

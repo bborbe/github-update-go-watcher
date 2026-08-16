@@ -35,10 +35,13 @@ type RepoState struct {
 //
 //   - Missing file -> fresh empty cursor, nil error (cold start is valid and
 //     re-publishes; downstream dedup by deterministic identifier absorbs it).
-//   - Unreadable or corrupt JSON -> error. The caller MUST refuse to run the
-//     cycle rather than proceed on a guessed-empty state, which would re-file
-//     the entire fleet. Recovery is the operator deleting the file to accept
-//     a cold start.
+//   - Corrupt JSON -> the file is renamed to <path>.corrupt and the cycle
+//     cold-starts. This re-files repos already reported, which deterministic
+//     UUID5 task identifiers dedup downstream; the earlier behaviour (return
+//     an error, operator deletes the file) wedged every cycle indefinitely
+//     because nothing rewrites a file that fails to load.
+//   - Unreadable file (permissions, I/O) -> error. That is an environment
+//     fault, not bad content, and retrying the same read is the right move.
 func LoadCursor(ctx context.Context, path string) (*Cursor, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is config-controlled
 	if os.IsNotExist(err) {
@@ -50,7 +53,19 @@ func LoadCursor(ctx context.Context, path string) (*Cursor, error) {
 	}
 	c := &Cursor{}
 	if err := json.Unmarshal(data, c); err != nil {
-		return nil, errors.Wrapf(ctx, err, "unmarshal cursor file path=%s", path)
+		// Preserve the bad file, then cold-start. Returning an error here
+		// aborted every poll cycle forever on a file nothing rewrites, so a
+		// single corrupt byte wedged the watcher until an operator noticed.
+		// Cold-starting re-files repos already reported, but the emitted
+		// task_identifier is a deterministic UUID5, so downstream dedup
+		// absorbs the repeat — the same reasoning that already makes a
+		// missing file a valid cold start.
+		bad := path + ".corrupt"
+		if rerr := os.Rename(path, bad); rerr != nil {
+			glog.Warningf("preserve corrupt cursor failed path=%s err=%v", path, rerr)
+		}
+		glog.Warningf("cursor corrupt, cold-starting path=%s saved=%s err=%v", path, bad, err)
+		return &Cursor{Repos: make(map[string]*RepoState)}, nil
 	}
 	if c.Repos == nil {
 		c.Repos = make(map[string]*RepoState)

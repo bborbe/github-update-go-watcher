@@ -26,6 +26,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 - feat: add paired ParseGoReleaseDefault, ParseGoDirectiveDefault, and ParseGoModVersionDefault variants
 - refactor: rename TaskCreationFilters to TaskCreationFilterList per list-type naming convention
 - chore: add counterfeiter:generate directive for TriggerHandler and lower two always-on logs to V(2)
+- fix: recover from a corrupt cursor file by renaming it to .corrupt and cold-starting, instead of returning an error that wedged every subsequent poll cycle indefinitely
 
 ## v0.0.1
 

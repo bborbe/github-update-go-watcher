@@ -454,7 +454,7 @@ var _ = Describe("watcher", func() {
 			})
 		})
 
-		Context("corrupt cursor returns error", func() {
+		Context("corrupt cursor cold-starts", func() {
 			BeforeEach(func() {
 				err := os.WriteFile(cursorPath, []byte("not json"), 0644)
 				Expect(err).NotTo(HaveOccurred())
@@ -468,19 +468,26 @@ var _ = Describe("watcher", func() {
 				buildWatcher()
 			})
 
-			It("returns error", func() {
+			It("does not return an error", func() {
 				err := watcher.Poll(context.Background(), false)
-				Expect(err).To(HaveOccurred())
+				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("no publish", func() {
+			It("still runs the cycle", func() {
 				_ = watcher.Poll(context.Background(), false)
-				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+				Expect(metrics.IncPollCycleCallCount()).To(Equal(1))
 			})
 
-			It("no poll cycle metric", func() {
+			It("preserves the corrupt file", func() {
 				_ = watcher.Poll(context.Background(), false)
-				Expect(metrics.IncPollCycleCallCount()).To(Equal(0))
+				saved, err := os.ReadFile(cursorPath + ".corrupt")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(saved)).To(Equal("not json"))
+			})
+
+			It("a second cycle also succeeds", func() {
+				Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+				Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 			})
 		})
 
