@@ -60,13 +60,13 @@ func (f TaskCreationFilterFunc) Skip(candidate Candidate) string {
 	return f(candidate)
 }
 
-// TaskCreationFilters is a slice composite returning the first non-empty
+// TaskCreationFilterList is a slice composite returning the first non-empty
 // reason from its members. An empty slice never skips.
-type TaskCreationFilters []TaskCreationFilter
+type TaskCreationFilterList []TaskCreationFilter
 
 // Skip returns the first non-empty reason from any contained filter,
 // short-circuiting on the first hit.
-func (fs TaskCreationFilters) Skip(candidate Candidate) string {
+func (fs TaskCreationFilterList) Skip(candidate Candidate) string {
 	for _, f := range fs {
 		if reason := f.Skip(candidate); reason != "" {
 			return reason

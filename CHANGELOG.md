@@ -22,6 +22,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 - refactor: move all composition into pkg/factory, remove libboltkv/libkv imports, remove /resetdb and /resetbucket endpoints
 - chore: update Makefile run target flags and example.env
 - docs: rewrite README with environment variables, metrics, skip reasons, and forced-emit verification procedure
+- fix: run the forced cycle through run.BackgroundRunner + run.CatchPanic instead of a raw goroutine, so a panic in Poll no longer takes down the process
+- feat: add paired ParseGoReleaseDefault, ParseGoDirectiveDefault, and ParseGoModVersionDefault variants
+- refactor: rename TaskCreationFilters to TaskCreationFilterList per list-type naming convention
+- chore: add counterfeiter:generate directive for TriggerHandler and lower two always-on logs to V(2)
 
 ## v0.0.1
 

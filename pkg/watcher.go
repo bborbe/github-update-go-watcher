@@ -98,7 +98,7 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 
 	w.metrics.IncReposScanned(len(repos))
 
-	cycleFilter := filter.TaskCreationFilters{w.taskCreationFilter}
+	cycleFilter := filter.TaskCreationFilterList{w.taskCreationFilter}
 	if !force {
 		cycleFilter = append(
 			cycleFilter,

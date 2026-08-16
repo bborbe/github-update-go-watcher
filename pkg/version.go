@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/bborbe/errors"
+	"github.com/golang/glog"
 )
 
 // goReleasePattern matches a go.dev release version string:
@@ -34,9 +35,31 @@ func ParseGoRelease(ctx context.Context, s string) (Version, error) {
 	return parseVersion(ctx, goReleasePattern, s, "go release version")
 }
 
+// ParseGoReleaseDefault parses a go.dev release version string, falling back
+// to defaultValue when the string is not a valid release version.
+func ParseGoReleaseDefault(ctx context.Context, s string, defaultValue Version) Version {
+	version, err := ParseGoRelease(ctx, s)
+	if err != nil {
+		glog.V(3).Infof("parse go release version %q failed, using default: %v", s, err)
+		return defaultValue
+	}
+	return version
+}
+
 // ParseGoDirective parses a go.mod go directive value (e.g. 1.26.6, 1.26).
 func ParseGoDirective(ctx context.Context, s string) (Version, error) {
 	return parseVersion(ctx, goDirectivePattern, s, "go directive version")
+}
+
+// ParseGoDirectiveDefault parses a go.mod go directive value, falling back to
+// defaultValue when the string is not a valid directive value.
+func ParseGoDirectiveDefault(ctx context.Context, s string, defaultValue Version) Version {
+	version, err := ParseGoDirective(ctx, s)
+	if err != nil {
+		glog.V(3).Infof("parse go directive %q failed, using default: %v", s, err)
+		return defaultValue
+	}
+	return version
 }
 
 func parseVersion(

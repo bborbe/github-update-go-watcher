@@ -62,6 +62,7 @@ func (c *goDevClientImpl) LatestStable(ctx context.Context) (Version, error) {
 	if err != nil {
 		return Version{}, errors.Wrapf(ctx, err, "get %s", c.url)
 	}
+	glog.V(2).Infof("go.dev request completed url=%s status=%d", c.url, resp.StatusCode)
 	defer func() {
 		if cerr := resp.Body.Close(); cerr != nil {
 			glog.Warningf("close go.dev response body: %v", cerr)

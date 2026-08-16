@@ -176,7 +176,7 @@ func (c *githubClient) ListRepos(ctx context.Context, owner string) ([]Repo, err
 		opts.Page = resp.NextPage
 	}
 
-	glog.Infof(
+	glog.V(2).Infof(
 		"github-update-go-watcher listed installation repos owner=%s total=%d private=%d in_scope=%d",
 		owner,
 		total,

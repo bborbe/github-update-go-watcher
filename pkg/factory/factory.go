@@ -61,7 +61,7 @@ func CreateKafkaSender(
 // SHAUnchangedFilter is composed in per cycle inside Watcher.Poll because it
 // needs a fresh CursorReader and is omitted on a forced cycle.
 func CreateStaticFilters(allowlist []string) filter.TaskCreationFilter {
-	return filter.TaskCreationFilters{
+	return filter.TaskCreationFilterList{
 		filter.NewRepoAllowlistFilter(allowlist),
 		filter.NewGoModPresentFilter(),
 		filter.NewGoModParsableFilter(),

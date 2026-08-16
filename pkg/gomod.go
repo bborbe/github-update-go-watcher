@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bborbe/errors"
+	"github.com/golang/glog"
 )
 
 // ParseGoModVersion extracts the `go` directive from raw go.mod bytes and
@@ -45,4 +46,19 @@ func ParseGoModVersion(ctx context.Context, content []byte) (Version, error) {
 		return Version{}, errors.Errorf(ctx, "scanner error reading go.mod: %v", err)
 	}
 	return Version{}, errors.Errorf(ctx, "no go directive found in go.mod")
+}
+
+// ParseGoModVersionDefault extracts the `go` directive from raw go.mod bytes,
+// falling back to defaultValue when the content has no readable directive.
+//
+// Callers that must distinguish "unparsable" from "absent" need ParseGoModVersion:
+// this variant collapses both onto defaultValue, which is why the watcher's own
+// filter chain uses the erroring form to produce skip reason "gomod_unparsable".
+func ParseGoModVersionDefault(ctx context.Context, content []byte, defaultValue Version) Version {
+	version, err := ParseGoModVersion(ctx, content)
+	if err != nil {
+		glog.V(3).Infof("parse go.mod version failed, using default: %v", err)
+		return defaultValue
+	}
+	return version
 }

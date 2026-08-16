@@ -41,7 +41,7 @@ var _ = Describe("watcher", func() {
 	})
 
 	buildWatcher := func() {
-		taskFilter := filter.TaskCreationFilters{
+		taskFilter := filter.TaskCreationFilterList{
 			filter.NewRepoAllowlistFilter(allowlist),
 			filter.NewGoModPresentFilter(),
 			filter.NewGoModParsableFilter(),

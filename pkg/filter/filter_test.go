@@ -11,10 +11,10 @@ import (
 	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
-var _ = Describe("TaskCreationFilters", func() {
+var _ = Describe("TaskCreationFilterList", func() {
 	Describe("empty composite", func() {
 		It("never skips", func() {
-			filters := filter.TaskCreationFilters{}
+			filters := filter.TaskCreationFilterList{}
 			reason := filters.Skip(filter.Candidate{})
 			Expect(reason).To(BeEmpty())
 		})
@@ -23,7 +23,7 @@ var _ = Describe("TaskCreationFilters", func() {
 	Describe("short-circuits on first non-empty reason", func() {
 		It("returns first non-empty reason and does not consult later filters", func() {
 			secondRan := false
-			filters := filter.TaskCreationFilters{
+			filters := filter.TaskCreationFilterList{
 				filter.TaskCreationFilterFunc(func(c filter.Candidate) string {
 					return "first"
 				}),
@@ -251,7 +251,7 @@ var _ = Describe("Closed set assertion", func() {
 var _ = Describe("Full chain ordering", func() {
 	It("returns earliest reason in chain order", func() {
 		// out-of-scope AND no go.mod AND not opted in -> scope
-		filters := filter.TaskCreationFilters{
+		filters := filter.TaskCreationFilterList{
 			filter.NewRepoAllowlistFilter([]string{"github.com/other"}),
 			filter.NewGoModPresentFilter(),
 			filter.NewGoModParsableFilter(),

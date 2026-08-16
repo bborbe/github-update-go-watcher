@@ -56,7 +56,7 @@ func ResolveGitHubClient(ctx context.Context, creds Credentials) (*http.Client, 
 	}
 
 	if appComplete {
-		glog.Infof(
+		glog.V(2).Infof(
 			"watcher auth mode=github-app app_id=%d installation_id=%d",
 			creds.AppID, creds.InstallationID,
 		)
