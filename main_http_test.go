@@ -6,20 +6,28 @@ package main_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/bborbe/github-update-go-watcher/pkg"
 	"github.com/bborbe/github-update-go-watcher/pkg/factory"
 )
 
 var (
 	watcherFake *fakeWatcher
 	gate        *realGate
-	metricsReg  *prometheus.Registry
+	// metricsOnce registers pkg.NewMetrics against prometheus.DefaultRegisterer
+	// exactly once for this test binary. /metrics is served from
+	// prometheus.DefaultRegisterer in production (see createHTTPServer), and
+	// registering the same collectors twice against the same registerer
+	// panics, so this must not run per-spec.
+	metricsOnce sync.Once
 )
 
 var _ = Describe("HTTP Endpoints", func() {
@@ -34,12 +42,14 @@ var _ = Describe("HTTP Endpoints", func() {
 		watcherFake = &fakeWatcher{calls: make(chan fakeCall, 10)}
 		gate = &realGate{ch: make(chan struct{}, 1)}
 
-		// Each test gets its own registry to avoid duplicate registration
-		metricsReg = prometheus.NewRegistry()
-		// Note: we don't call pkg.NewMetrics here because the router
-		// serves from prometheus.DefaultRegisterer in production.
-		// The endpoint-contract tests verify the router wiring, not metrics registration.
-		// Metrics are verified in pkg/metrics_test.go with proper isolation.
+		// /metrics is served from prometheus.DefaultRegisterer in production
+		// (see createHTTPServer / factory.CreateRouter), so the endpoint-
+		// contract test registers the real watcher metrics there too, once
+		// per test binary — re-registering the same collectors on every
+		// spec would panic on duplicate registration.
+		metricsOnce.Do(func() {
+			pkg.NewMetrics(prometheus.DefaultRegisterer)
+		})
 
 		triggerHandler := factory.CreateTriggerHandler(baseCtx, watcherFake, gate)
 		router := factory.CreateRouter(baseCtx, triggerHandler, nil)
@@ -76,10 +86,31 @@ var _ = Describe("HTTP Endpoints", func() {
 	})
 
 	Describe("GET /metrics", func() {
-		It("returns 200", func() {
+		It("returns 200 with all four metrics and every label pre-initialised to 0", func() {
 			resp := httpGet("/metrics")
 			defer resp.Body.Close()
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			text := string(body)
+
+			for _, result := range pkg.PollCycleResults {
+				Expect(text).To(ContainSubstring(
+					`github_update_go_watcher_poll_cycle_total{result="` + result + `"} 0`,
+				))
+			}
+			for _, status := range pkg.PublishStatuses {
+				Expect(text).To(ContainSubstring(
+					`github_update_go_watcher_published_total{status="` + status + `"} 0`,
+				))
+			}
+			for _, reason := range pkg.FilterSkipReasons {
+				Expect(text).To(ContainSubstring(
+					`github_update_go_watcher_filter_skipped_total{reason="` + reason + `"} 0`,
+				))
+			}
+			Expect(text).To(ContainSubstring("github_update_go_watcher_repos_scanned_total 0"))
 		})
 	})
 
