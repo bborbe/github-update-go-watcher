@@ -16,6 +16,12 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 - feat: add pkg/cursor for persisted-memory LoadCursor/SaveCursor with atomic write via temp file + rename
 - feat: add pkg/cursorreader adapter bridging Cursor to filter.CursorReader without import cycle
 - feat: add pkg/candidate (per-repo observation), pkg/taskbuilder (frozen CreateTaskCommand contract), pkg/taskpublisher (send + counter), and pkg/watcher (full scan cycle orchestration)
+- feat: wire watcher into binary with env binding, poll loop, single-cycle lock, HTTP surface (health, readiness, metrics, log level, forced cycle), and remove scaffold key-value-store endpoints
+- feat: add POST /trigger endpoint for forced cycle with exactly-one-cycle gate
+- feat: add pkg/cyclegate for non-blocking single-cycle enforcement shared by timer and endpoint
+- refactor: move all composition into pkg/factory, remove libboltkv/libkv imports, remove /resetdb and /resetbucket endpoints
+- chore: update Makefile run target flags and example.env
+- docs: rewrite README with environment variables, metrics, skip reasons, and forced-emit verification procedure
 
 ## v0.0.1
 

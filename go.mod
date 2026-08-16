@@ -4,11 +4,10 @@ go 1.26.6
 
 require (
 	github.com/bborbe/agent v0.72.0
-	github.com/bborbe/boltkv v1.14.8
+	github.com/bborbe/cqrs v0.6.0
 	github.com/bborbe/errors v1.5.17
 	github.com/bborbe/http v1.26.20
 	github.com/bborbe/kafka v1.25.7
-	github.com/bborbe/kv v1.21.9
 	github.com/bborbe/log v1.6.21
 	github.com/bborbe/maintainer v0.48.1
 	github.com/bborbe/metrics v0.5.11
@@ -30,9 +29,10 @@ require (
 	github.com/IBM/sarama v1.60.1 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/bborbe/argument/v2 v2.12.34 // indirect
+	github.com/bborbe/boltkv v1.14.8 // indirect
 	github.com/bborbe/collection v1.20.20 // indirect
-	github.com/bborbe/cqrs v0.6.0 // indirect
 	github.com/bborbe/k8s v1.14.3 // indirect
+	github.com/bborbe/kv v1.21.9 // indirect
 	github.com/bborbe/math v1.3.18 // indirect
 	github.com/bborbe/parse v1.10.19 // indirect
 	github.com/bborbe/strimzi v1.8.5 // indirect
@@ -88,7 +88,6 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.etcd.io/bbolt v1.5.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect

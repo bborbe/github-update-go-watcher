@@ -1,8 +1,12 @@
 ---
-status: approved
+status: completed
 spec: ["001"]
+execution_id: github-update-go-watcher-goupdate-exec-005-spec-001-binary-wiring-and-readme
+dark-factory-version: dev
 created: "2026-08-16T12:53:45Z"
 queued: "2026-08-16T13:17:03Z"
+started: "2026-08-16T13:59:27Z"
+completed: "2026-08-16T14:39:31Z"
 ---
 
 <summary>
