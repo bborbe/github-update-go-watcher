@@ -1,5 +1,5 @@
 ---
-status: verifying
+status: completed
 tags:
     - dark-factory
     - spec
@@ -7,6 +7,7 @@ approved: "2026-08-16T12:48:53Z"
 generating: "2026-08-16T13:05:07Z"
 prompted: "2026-08-16T13:05:07Z"
 verifying: "2026-08-16T14:39:31Z"
+completed: "2026-08-16T14:59:04Z"
 branch: dark-factory/go-update-task-watcher
 ---
 
