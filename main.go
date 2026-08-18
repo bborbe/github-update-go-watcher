@@ -41,6 +41,7 @@ type application struct {
 
 	Listen        string `required:"false" arg:"listen"         env:"LISTEN"         usage:"HTTP listen address"                                                                             default:":9090"`
 	Stage         string `required:"true"  arg:"stage"          env:"STAGE"          usage:"Deployment stage (dev|prod), stamped on every emitted task"`
+	UpdateScope   string `required:"false" arg:"update-scope"   env:"UPDATE_SCOPE"   usage:"Fleet-wide update scope stamped on every emitted task (golang|deps); empty = both"`
 	Owner         string `required:"true"  arg:"owner"          env:"OWNER"          usage:"GitHub owner / org to scan (e.g. bborbe)"`
 	RepoAllowlist string `required:"false" arg:"repo-allowlist" env:"REPO_ALLOWLIST" usage:"Comma-separated host-qualified repo allowlist (host/owner/repo); empty = allow-all within OWNER"`
 	PollInterval  string `required:"false" arg:"poll-interval"  env:"POLL_INTERVAL"  usage:"Poll interval (Go duration)"                                                                     default:"10m"`
@@ -112,6 +113,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.CursorPath,
 		a.Owner,
 		a.Stage,
+		a.UpdateScope,
 		factory.CreateStaticFilters(allowlist),
 	)
 	gate := pkg.NewCycleGate()

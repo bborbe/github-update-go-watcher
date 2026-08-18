@@ -114,6 +114,18 @@ var _ = Describe("taskbuilder", func() {
 			Expect(realCmd.Frontmatter["stage"]).To(Equal("dev"))
 		})
 
+		It("omits update_scope when not configured (agent defaults to both)", func() {
+			realCmd := pkg.BuildCreateCommand(candidate, cfg)
+			_, present := realCmd.Frontmatter["update_scope"]
+			Expect(present).To(BeFalse())
+		})
+
+		It("emits update_scope when configured", func() {
+			cfg.UpdateScope = "golang"
+			realCmd := pkg.BuildCreateCommand(candidate, cfg)
+			Expect(realCmd.Frontmatter["update_scope"]).To(Equal("golang"))
+		})
+
 		It("task_identifier is derived from owner/repo/HEAD", func() {
 			realCmd := pkg.BuildCreateCommand(candidate, cfg)
 			expected := pkg.DeriveTaskID(
