@@ -14,6 +14,10 @@ import (
 // TaskConfig groups per-task envelope settings.
 type TaskConfig struct {
 	Stage string // "dev" or "prod" — emitted as the `stage` field
+	// UpdateScope is the fleet-wide update scope emitted on every task
+	// ("golang" | "deps"). Empty = unset — the field is omitted and the agent
+	// defaults to "both", byte-identical to the pre-knob behaviour.
+	UpdateScope string
 }
 
 // ComputeTaskTitle returns the frozen title form:
@@ -52,7 +56,7 @@ func buildFrontmatter(
 	taskIDStr string,
 	cfg TaskConfig,
 ) agentlib.TaskFrontmatter {
-	return agentlib.TaskFrontmatter{
+	frontmatter := agentlib.TaskFrontmatter{
 		"task_type":       "github-update-go",
 		"assignee":        "github-update-go-agent",
 		"phase":           "planning",
@@ -70,6 +74,13 @@ func buildFrontmatter(
 		"current_go": c.CurrentGo.Number(),
 		"latest_go":  c.LatestGo.Number(),
 	}
+	// Emit update_scope only when a fleet-wide scope is configured. Empty =
+	// omitted, so the agent's "both" default applies — the emitted task is
+	// byte-identical to the pre-knob shape.
+	if cfg.UpdateScope != "" {
+		frontmatter["update_scope"] = cfg.UpdateScope
+	}
+	return frontmatter
 }
 
 func buildTaskBody(c Candidate) string {

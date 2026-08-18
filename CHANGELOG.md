@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: emit an optional `update_scope` field (`golang` | `deps`) on every emitted task from the `UPDATE_SCOPE` env, so a fleet-wide sweep can be scoped Go-only or deps-only. Unset = omitted, agent defaults to `both` (byte-identical to before).
+
 ## v0.1.1
 
 - fix(build): publish semver-tagged images and drop the in-repo k8s manifests. The scaffold's `Makefile.docker` tagged by `$(BRANCH)` (`:dev`/`:prod`) and `Makefile.k8s` applied `k8s/*.yaml` with `kubectl` — neither fits how this unit is actually deployed, which is a pinned OCI Helm chart (`watcher.tag: v0.1.0`) mirrored into the quant registry, matching the three sibling watchers. A branch-tagged image cannot be pinned by version, and the `k8s/` manifests would have deployed a second unmanaged copy alongside the Helm release. Also passes `BUILD_GIT_VERSION` to the build, which the sibling's Makefile omits despite the Dockerfile consuming it for `org.opencontainers.image.version`
