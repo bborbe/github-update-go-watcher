@@ -1,6 +1,6 @@
 ---
 status: completed
-spec: ["001"]
+spec: [001-go-update-task-watcher]
 execution_id: github-update-go-watcher-goupdate-exec-005-spec-001-binary-wiring-and-readme
 dark-factory-version: dev
 created: "2026-08-16T12:53:45Z"

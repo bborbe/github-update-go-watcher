@@ -1,6 +1,6 @@
 ---
 status: completed
-spec: ["001"]
+spec: [001-go-update-task-watcher]
 summary: Implemented pkg/filter decision chain (6 filters + interface/composite), pkg/cursor persistence with atomic writes, and pkg/cursorreader adapter
 execution_id: github-update-go-watcher-goupdate-exec-002-spec-001-filters-and-cursor
 dark-factory-version: dev
