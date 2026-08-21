@@ -1,6 +1,6 @@
 ---
 status: completed
-spec: ["001"]
+spec: [001-go-update-task-watcher]
 summary: Created pkg/ leaf domain package with Go-version parsing/normalisation/comparison, stable-Go lookup client, deterministic task-identifier derivation, Prometheus metrics surface, and Repo value type
 execution_id: github-update-go-watcher-goupdate-exec-001-spec-001-domain-core
 dark-factory-version: dev

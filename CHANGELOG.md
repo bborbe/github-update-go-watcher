@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: Make build tooling compatible with Go 1.27 — run `gofmt -w` after golines in the `format` target so golines' wrapping is normalized before the gofmt lint check, bump golangci-lint to v2.13.1 (fixes staticcheck `buildir` panic), and bump errcheck to v1.20.0 (fixes `package "context" without types`)
+
 ## v0.2.0
 
 - feat: emit an optional `update_scope` field (`golang` | `deps`) on every emitted task from the `UPDATE_SCOPE` env, so a fleet-wide sweep can be scoped Go-only or deps-only. Unset = omitted, agent defaults to `both` (byte-identical to before).
