@@ -1,6 +1,6 @@
 module github.com/bborbe/github-update-go-watcher
 
-go 1.26.6
+go 1.27.0
 
 require (
 	github.com/bborbe/agent v0.72.0
