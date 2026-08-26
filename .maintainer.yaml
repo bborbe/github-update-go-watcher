@@ -15,10 +15,16 @@
 # goUpdate.autoUpdate: when true, github-update-go-watcher emits a Go-bump task
 # for this repo. Trust gate — absent file, absent section, or absent/false key
 # all read as opted out. This repo dogfoods its own flag.
+#
+# autoMerge.trivial: when true, github-pr-watcher auto-applies the auto-merge
+# label to mechanically trivial PRs (go.mod / Dockerfile / CHANGELOG / workflow
+# bumps) so GitHub-native auto-merge lands them once checks + review are green.
 release:
   autoRelease: true
   changelogRewrite: false
 prReviewer:
   autoApprove: true
+autoMerge:
+  trivial: true
 goUpdate:
   autoUpdate: true

@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: opt into `autoMerge.trivial` — mechanically trivial update PRs (go.mod / Dockerfile / CHANGELOG / workflow bumps) get the auto-merge label from github-pr-watcher, so GitHub-native auto-merge lands them once checks + review are green
+
 ## v0.3.0
 
 - feat: merge-detection auto-completes update-go vault tasks — the watcher publishes a `complete-task` command (same pattern as github-build-watcher's red→green closure) when an emitted task's update PR (`fix/update-go-<sha>`) has merged, so the controller flips the task `human_review` → `done` without a manual close-sweep
