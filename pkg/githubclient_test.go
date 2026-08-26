@@ -528,4 +528,135 @@ var _ = Describe("GitHubClient", func() {
 			})
 		})
 	})
+
+	Describe("GetMergedUpdatePR", func() {
+		Context("merged update PR exists", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/repos/myowner/myrepo/pulls" {
+						http.NotFound(w, r)
+						return
+					}
+					if r.URL.Query().Get("state") != "all" {
+						http.Error(w, "expected state=all", http.StatusBadRequest)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[
+						{"number": 1, "state": "merged", "merged": true, "head": {"ref": "fix/update-go-d630ef3"}}
+					]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns true", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				merged, err := client.GetMergedUpdatePR(
+					ctx,
+					repo,
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+				)
+				Expect(err).To(Succeed())
+				Expect(merged).To(BeTrue())
+			})
+		})
+
+		Context("only open update PR", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[
+						{"number": 1, "state": "open", "merged": false, "head": {"ref": "fix/update-go-d630ef3"}}
+					]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns false", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				merged, err := client.GetMergedUpdatePR(
+					ctx,
+					repo,
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+				)
+				Expect(err).To(Succeed())
+				Expect(merged).To(BeFalse())
+			})
+		})
+
+		Context("no matching PRs", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns false", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				merged, err := client.GetMergedUpdatePR(
+					ctx,
+					repo,
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+				)
+				Expect(err).To(Succeed())
+				Expect(merged).To(BeFalse())
+			})
+		})
+
+		Context("rate limited", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", "0")
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprint(
+						w,
+						`{"message": "API rate limit exceeded", "documentation_url": "https://docs.github.com"}`,
+					)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns ErrRateLimited", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				_, err := client.GetMergedUpdatePR(
+					ctx,
+					repo,
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+				)
+				Expect(errors.Is(err, pkg.ErrRateLimited)).To(BeTrue())
+			})
+		})
+	})
 })

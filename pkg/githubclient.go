@@ -68,6 +68,19 @@ type GitHubClient interface {
 	// an error so the repo is dropped from the cycle rather than recorded as a
 	// consent verdict.
 	GetMaintainerConfig(ctx context.Context, repo Repo) (maintainerconfig.MaintainerConfig, error)
+
+	// GetMergedUpdatePR reports whether repo has a merged pull request whose
+	// head branch is the update branch for headSHA (fix/update-go-<sha[:7]> —
+	// the deterministic branch the github-update-go-agent opens from the task
+	// filed at that HEAD). A merged PR on that branch is the shipped signal for
+	// the update task: the watcher publishes a complete-task command so the
+	// vault task auto-completes without a manual close-sweep.
+	//
+	//   - (true, nil) — a merged PR with that head branch exists.
+	//   - (false, nil) — no such PR, or none merged yet.
+	//   - (false, ErrRateLimited) on primary or abuse rate limiting.
+	//   - (false, wrapped error) on every other failure.
+	GetMergedUpdatePR(ctx context.Context, repo Repo, headSHA string) (bool, error)
 }
 
 // NewGitHubClient returns the production GitHubClient backed by the given
@@ -293,4 +306,47 @@ func (c *githubClient) GetMaintainerConfig(
 		)
 	}
 	return cfg, nil
+}
+
+// GetMergedUpdatePR implements GitHubClient. It lists pull requests whose head
+// branch is the update branch for headSHA (fix/update-go-<sha[:7]>, the exact
+// branch the github-update-go-agent opens from the task filed at that HEAD)
+// and reports whether any is merged. The list is state=all so a merged PR is
+// found even though the default filter would only return open ones.
+func (c *githubClient) GetMergedUpdatePR(
+	ctx context.Context,
+	repo Repo,
+	headSHA string,
+) (bool, error) {
+	opts := &gogithub.PullRequestListOptions{
+		State: "all",
+		Head:  repo.Owner + ":" + updateBranchName(headSHA),
+		ListOptions: gogithub.ListOptions{
+			PerPage: 100,
+		},
+	}
+	prs, _, err := c.client.PullRequests.List(ctx, repo.Owner, repo.Name, opts)
+	if err != nil {
+		return false, c.wrapRateLimitErr(
+			ctx, err, "list pull requests %s head=%s", repo.String(), updateBranchName(headSHA),
+		)
+	}
+	for _, pr := range prs {
+		if pr.GetMerged() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// updateBranchName returns the deterministic head branch the
+// github-update-go-agent opens for a task filed at headSHA:
+// "fix/update-go-<sha[:7]>". Kept in sync with the agent's branchPrefix +
+// ref[:7] (ref = the task's pinned filing SHA = the watcher's emit-time HEAD).
+func updateBranchName(headSHA string) string {
+	short := headSHA
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return "fix/update-go-" + short
 }

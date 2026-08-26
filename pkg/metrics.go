@@ -18,6 +18,10 @@ type Metrics interface {
 	// IncPublished — status: "create" | "error"
 	IncPublished(status string)
 
+	// IncCompleted — status: "complete" | "error". Counts complete-task
+	// command publishes for merged update PRs (merge-detection pass).
+	IncCompleted(status string)
+
 	// IncReposScanned adds n repos scanned in one cycle (no labels).
 	IncReposScanned(n int)
 
@@ -39,6 +43,7 @@ var (
 		"go_version_error",
 	}
 	PublishStatuses   = []string{"create", "error"}
+	CompleteStatuses  = []string{"complete", "error"}
 	FilterSkipReasons = []string{
 		"scope",
 		"no_gomod",
@@ -77,6 +82,14 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 			},
 			[]string{"status"},
 		),
+		completed: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: metricNamespace,
+				Name:      "completed_total",
+				Help:      "Total number of complete-task publishes by status",
+			},
+			[]string{"status"},
+		),
 		reposScanned: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: metricNamespace,
@@ -95,6 +108,7 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 	}
 	registerer.MustRegister(m.pollCycle)
 	registerer.MustRegister(m.published)
+	registerer.MustRegister(m.completed)
 	registerer.MustRegister(m.reposScanned)
 	registerer.MustRegister(m.filterSkipped)
 
@@ -104,6 +118,9 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 	}
 	for _, label := range PublishStatuses {
 		m.published.WithLabelValues(label).Add(0)
+	}
+	for _, label := range CompleteStatuses {
+		m.completed.WithLabelValues(label).Add(0)
 	}
 	for _, label := range FilterSkipReasons {
 		m.filterSkipped.WithLabelValues(label).Add(0)
@@ -115,6 +132,7 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 type metricsImpl struct {
 	pollCycle     *prometheus.CounterVec
 	published     *prometheus.CounterVec
+	completed     *prometheus.CounterVec
 	reposScanned  prometheus.Counter
 	filterSkipped *prometheus.CounterVec
 }
@@ -125,6 +143,10 @@ func (m *metricsImpl) IncPollCycle(result string) {
 
 func (m *metricsImpl) IncPublished(status string) {
 	m.published.WithLabelValues(status).Inc()
+}
+
+func (m *metricsImpl) IncCompleted(status string) {
+	m.completed.WithLabelValues(status).Inc()
 }
 
 func (m *metricsImpl) IncReposScanned(n int) {

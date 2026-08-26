@@ -29,6 +29,12 @@ type Cursor struct {
 // RepoState is the cursor entry per repo.
 type RepoState struct {
 	LastSeenHeadSHA string `json:"last_seen_head_sha"`
+	// CompletedHeadSHA is the head SHA whose update task this watcher has
+	// already auto-completed via a complete-task command (a merged update PR
+	// was observed). Prevents re-publishing the same completion every cycle —
+	// the controller executor is idempotent, but the cursor marker keeps the
+	// no-op off the wire.
+	CompletedHeadSHA string `json:"completed_head_sha,omitempty"`
 }
 
 // LoadCursor reads cursor state from path.
