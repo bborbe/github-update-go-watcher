@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	taskmocks "github.com/bborbe/agent/mocks"
 	"github.com/bborbe/maintainer/maintainerconfig"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -21,13 +22,14 @@ import (
 
 var _ = Describe("watcher", func() {
 	var (
-		ghClient    *mocks.GitHubClient
-		goDevClient *mocks.GoDevClient
-		publisher   *mocks.TaskPublisher
-		metrics     *mocks.Metrics
-		watcher     pkg.Watcher
-		cursorPath  string
-		allowlist   []string
+		ghClient       *mocks.GitHubClient
+		goDevClient    *mocks.GoDevClient
+		publisher      *mocks.TaskPublisher
+		completeSender *taskmocks.TaskCompleteCommandSender
+		metrics        *mocks.Metrics
+		watcher        pkg.Watcher
+		cursorPath     string
+		allowlist      []string
 	)
 
 	BeforeEach(func() {
@@ -36,6 +38,7 @@ var _ = Describe("watcher", func() {
 		ghClient = &mocks.GitHubClient{}
 		goDevClient = &mocks.GoDevClient{}
 		publisher = &mocks.TaskPublisher{}
+		completeSender = new(taskmocks.TaskCompleteCommandSender)
 		metrics = &mocks.Metrics{}
 		allowlist = []string{"github.com/bborbe/disk-status"}
 	})
@@ -52,6 +55,7 @@ var _ = Describe("watcher", func() {
 			ghClient,
 			goDevClient,
 			publisher,
+			completeSender,
 			metrics,
 			cursorPath,
 			"bborbe",
@@ -635,6 +639,93 @@ var _ = Describe("watcher", func() {
 					Expect(validLabels[arg]).To(BeTrue(),
 						"IncFilterSkipped(%q) not in FilterSkipReasons", arg)
 				}
+			})
+		})
+
+		Context("merge-detection auto-completes task on merged update PR", func() {
+			var headSHA = "d630ef3526cfc57fbdccd9ba53c5c3a02945e407"
+
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns(headSHA, nil)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
+					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
+				}, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				publisher.PublishCreateReturns(true)
+				metrics.IncFilterSkippedStub = func(string) {}
+			})
+
+			It("publishes a CompleteCommand for a merged update PR", func() {
+				ghClient.GetMergedUpdatePRReturns(true, nil)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
+				_, cmd := completeSender.SendCommandArgsForCall(0)
+				Expect(string(cmd.TaskIdentifier)).To(Equal(
+					pkg.DeriveTaskID("bborbe", "disk-status", headSHA).String(),
+				))
+				Expect(metrics.IncCompletedCallCount()).To(Equal(1))
+			})
+
+			It("does not publish a CompleteCommand when the update PR is not merged", func() {
+				ghClient.GetMergedUpdatePRReturns(false, nil)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
+			})
+
+			It("publishes once and marks the cursor entry as completed", func() {
+				ghClient.GetMergedUpdatePRReturns(true, nil)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
+
+				content, err := os.ReadFile(cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(content)).To(ContainSubstring(
+					`"completed_head_sha":"` + headSHA + `"`,
+				))
+			})
+
+			It("skips the already-completed repo on the next cycle", func() {
+				ghClient.GetMergedUpdatePRReturns(true, nil)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				// second poll: cursor marks the repo completed, no re-publish
+				err = watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
+			})
+
+			It("aborts the cycle when GetMergedUpdatePR is rate limited", func() {
+				ghClient.GetMergedUpdatePRReturns(false, pkg.ErrRateLimited)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
+				Expect(metrics.IncPollCycleArgsForCall(
+					metrics.IncPollCycleCallCount() - 1,
+				)).To(Equal("rate_limited"))
 			})
 		})
 	})

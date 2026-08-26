@@ -52,6 +52,21 @@ type GitHubClient struct {
 		result1 maintainerconfig.MaintainerConfig
 		result2 error
 	}
+	GetMergedUpdatePRStub        func(context.Context, pkg.Repo, string) (bool, error)
+	getMergedUpdatePRMutex       sync.RWMutex
+	getMergedUpdatePRArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+		arg3 string
+	}
+	getMergedUpdatePRReturns struct {
+		result1 bool
+		result2 error
+	}
+	getMergedUpdatePRReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
 	ListReposStub        func(context.Context, string) ([]pkg.Repo, error)
 	listReposMutex       sync.RWMutex
 	listReposArgsForCall []struct {
@@ -261,6 +276,72 @@ func (fake *GitHubClient) GetMaintainerConfigReturnsOnCall(i int, result1 mainta
 	}
 	fake.getMaintainerConfigReturnsOnCall[i] = struct {
 		result1 maintainerconfig.MaintainerConfig
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *GitHubClient) GetMergedUpdatePR(arg1 context.Context, arg2 pkg.Repo, arg3 string) (bool, error) {
+	fake.getMergedUpdatePRMutex.Lock()
+	ret, specificReturn := fake.getMergedUpdatePRReturnsOnCall[len(fake.getMergedUpdatePRArgsForCall)]
+	fake.getMergedUpdatePRArgsForCall = append(fake.getMergedUpdatePRArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.GetMergedUpdatePRStub
+	fakeReturns := fake.getMergedUpdatePRReturns
+	fake.recordInvocation("GetMergedUpdatePR", []interface{}{arg1, arg2, arg3})
+	fake.getMergedUpdatePRMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *GitHubClient) GetMergedUpdatePRCallCount() int {
+	fake.getMergedUpdatePRMutex.RLock()
+	defer fake.getMergedUpdatePRMutex.RUnlock()
+	return len(fake.getMergedUpdatePRArgsForCall)
+}
+
+func (fake *GitHubClient) GetMergedUpdatePRCalls(stub func(context.Context, pkg.Repo, string) (bool, error)) {
+	fake.getMergedUpdatePRMutex.Lock()
+	defer fake.getMergedUpdatePRMutex.Unlock()
+	fake.GetMergedUpdatePRStub = stub
+}
+
+func (fake *GitHubClient) GetMergedUpdatePRArgsForCall(i int) (context.Context, pkg.Repo, string) {
+	fake.getMergedUpdatePRMutex.RLock()
+	defer fake.getMergedUpdatePRMutex.RUnlock()
+	argsForCall := fake.getMergedUpdatePRArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *GitHubClient) GetMergedUpdatePRReturns(result1 bool, result2 error) {
+	fake.getMergedUpdatePRMutex.Lock()
+	defer fake.getMergedUpdatePRMutex.Unlock()
+	fake.GetMergedUpdatePRStub = nil
+	fake.getMergedUpdatePRReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *GitHubClient) GetMergedUpdatePRReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.getMergedUpdatePRMutex.Lock()
+	defer fake.getMergedUpdatePRMutex.Unlock()
+	fake.GetMergedUpdatePRStub = nil
+	if fake.getMergedUpdatePRReturnsOnCall == nil {
+		fake.getMergedUpdatePRReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.getMergedUpdatePRReturnsOnCall[i] = struct {
+		result1 bool
 		result2 error
 	}{result1, result2}
 }

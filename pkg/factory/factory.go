@@ -57,6 +57,17 @@ func CreateKafkaSender(
 	return task.NewCreateCommandSender(sender, "")
 }
 
+// CreateKafkaCompleteSender constructs the typed complete-task command sender
+// backed by the same Kafka sync producer. Publishes CompleteCommands for
+// repos whose update PR merged (merge-detection → task completion).
+func CreateKafkaCompleteSender(
+	syncProducer kafka.SyncProducer,
+	topicPrefix base.TopicPrefix,
+) task.CompleteCommandSender {
+	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
+	return task.NewCompleteCommandSender(sender, "")
+}
+
 // CreateStaticFilters builds the cycle-invariant chain in its frozen order.
 // SHAUnchangedFilter is composed in per cycle inside Watcher.Poll because it
 // needs a fresh CursorReader and is omitted on a forced cycle.
@@ -75,6 +86,7 @@ func CreateWatcher(
 	githubHTTPClient *http.Client,
 	goDevHTTPClient *http.Client,
 	sender task.CreateCommandSender,
+	completeSender task.CompleteCommandSender,
 	metrics pkg.Metrics,
 	cursorPath string,
 	owner string,
@@ -92,6 +104,7 @@ func CreateWatcher(
 		ghClient,
 		goDevClient,
 		publisher,
+		completeSender,
 		metrics,
 		cursorPath,
 		owner,

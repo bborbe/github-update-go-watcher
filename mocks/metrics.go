@@ -8,6 +8,11 @@ import (
 )
 
 type Metrics struct {
+	IncCompletedStub        func(string)
+	incCompletedMutex       sync.RWMutex
+	incCompletedArgsForCall []struct {
+		arg1 string
+	}
 	IncFilterSkippedStub        func(string)
 	incFilterSkippedMutex       sync.RWMutex
 	incFilterSkippedArgsForCall []struct {
@@ -30,6 +35,38 @@ type Metrics struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *Metrics) IncCompleted(arg1 string) {
+	fake.incCompletedMutex.Lock()
+	fake.incCompletedArgsForCall = append(fake.incCompletedArgsForCall, struct {
+		arg1 string
+	}{arg1})
+	stub := fake.IncCompletedStub
+	fake.recordInvocation("IncCompleted", []interface{}{arg1})
+	fake.incCompletedMutex.Unlock()
+	if stub != nil {
+		fake.IncCompletedStub(arg1)
+	}
+}
+
+func (fake *Metrics) IncCompletedCallCount() int {
+	fake.incCompletedMutex.RLock()
+	defer fake.incCompletedMutex.RUnlock()
+	return len(fake.incCompletedArgsForCall)
+}
+
+func (fake *Metrics) IncCompletedCalls(stub func(string)) {
+	fake.incCompletedMutex.Lock()
+	defer fake.incCompletedMutex.Unlock()
+	fake.IncCompletedStub = stub
+}
+
+func (fake *Metrics) IncCompletedArgsForCall(i int) string {
+	fake.incCompletedMutex.RLock()
+	defer fake.incCompletedMutex.RUnlock()
+	argsForCall := fake.incCompletedArgsForCall[i]
+	return argsForCall.arg1
 }
 
 func (fake *Metrics) IncFilterSkipped(arg1 string) {

@@ -8,6 +8,8 @@ import (
 	"context"
 	stderrors "errors"
 
+	agentlib "github.com/bborbe/agent"
+	task "github.com/bborbe/agent/command/task"
 	"github.com/bborbe/errors"
 	"github.com/golang/glog"
 
@@ -33,11 +35,13 @@ type Watcher interface {
 // owner is a single GitHub org per watcher instance (multi-org = multiple
 // deployments). taskCreationFilter is the cycle-invariant chain built at
 // wiring time; SHAUnchangedFilter is composed in per cycle because it needs a
-// fresh CursorReader.
+// fresh CursorReader. completeSender publishes CompleteCommands for repos
+// whose update PR merged (merge-detection → task completion).
 func NewWatcher(
 	ghClient GitHubClient,
 	goDevClient GoDevClient,
 	publisher TaskPublisher,
+	completeSender task.CompleteCommandSender,
 	metrics Metrics,
 	cursorPath string,
 	owner string,
@@ -47,6 +51,7 @@ func NewWatcher(
 		ghClient:           ghClient,
 		goDevClient:        goDevClient,
 		publisher:          publisher,
+		completeSender:     completeSender,
 		metrics:            metrics,
 		cursorPath:         cursorPath,
 		owner:              owner,
@@ -58,6 +63,7 @@ type watcher struct {
 	ghClient           GitHubClient
 	goDevClient        GoDevClient
 	publisher          TaskPublisher
+	completeSender     task.CompleteCommandSender
 	metrics            Metrics
 	cursorPath         string
 	owner              string
@@ -109,6 +115,21 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 	abortReason := w.processRepos(ctx, cursorState, repos, cycleFilter, latestGo)
 	if abortReason != "" {
 		w.metrics.IncPollCycle(abortReason)
+		return nil
+	}
+
+	// Merge-detection pass: a repo whose update PR merged gets its vault task
+	// auto-completed (complete-task command) instead of sitting in human_review
+	// until a manual close-sweep. Rate-limited here aborts the whole cycle the
+	// same way it does during processRepos — one throttle is shared.
+	if reason := w.completeMergedUpdates(ctx, cursorState, repos); reason != "" {
+		w.metrics.IncPollCycle(reason)
+		// Persist cursor mutations made before the abort (completed-head
+		// markers) so a completion already published this cycle is not
+		// re-published next cycle after a lost in-memory state.
+		if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
+			glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
+		}
 		return nil
 	}
 
@@ -218,6 +239,106 @@ func (w *watcher) gatherCandidate(
 		}
 	}
 	return candidate, "", false
+}
+
+// completeMergedUpdates scans the cursor's repos for a merged update PR and,
+// when found, publishes a CompleteCommand for the task filed at that HEAD
+// (same deterministic DeriveTaskID used at create time, so the controller
+// closes the exact task the watcher created). Returns an abort reason (e.g.
+// "rate_limited") or "" to continue the cycle.
+//
+// Only repos that have a cursor entry (i.e. the watcher emitted a task for
+// them at LastSeenHeadSHA) are considered — a repo never scanned can't have a
+// task to complete. A repo already completed for that HEAD is skipped via the
+// cursor marker, so the no-op completion stays off the wire.
+func (w *watcher) completeMergedUpdates(
+	ctx context.Context,
+	cursorState *Cursor,
+	repos []Repo,
+) string {
+	for _, repo := range repos {
+		select {
+		case <-ctx.Done():
+			glog.V(2).Infof(
+				"poll cancelled during completeMergedUpdates at repo=%s",
+				repo.Key(),
+			)
+			return ""
+		default:
+		}
+
+		state, ok := cursorState.Repos[repo.Key()]
+		if !ok || state == nil || state.LastSeenHeadSHA == "" {
+			continue
+		}
+		if state.LastSeenHeadSHA == state.CompletedHeadSHA {
+			continue
+		}
+
+		merged, err := w.ghClient.GetMergedUpdatePR(ctx, repo, state.LastSeenHeadSHA)
+		if err != nil {
+			if stderrors.Is(err, ErrRateLimited) {
+				glog.Warningf(
+					"poll cycle aborted: rate limited during GetMergedUpdatePR owner=%s",
+					w.owner,
+				)
+				return "rate_limited"
+			}
+			glog.Warningf(
+				"complete-task: GetMergedUpdatePR failed repo=%s sha=%s err=%v",
+				repo.Key(),
+				state.LastSeenHeadSHA,
+				err,
+			)
+			continue
+		}
+		if !merged {
+			continue
+		}
+
+		w.completeTask(ctx, repo, state, state.LastSeenHeadSHA)
+	}
+	return ""
+}
+
+// completeTask publishes a CompleteCommand for the update task filed at
+// headSHA and marks the cursor entry so the completion fires once. The
+// controller's executor is idempotent (skips when ## Resolution is already
+// present), so a lost publish is safe — the next cycle retries. Errors are
+// logged and counted, never fatal to the poll.
+func (w *watcher) completeTask(
+	ctx context.Context,
+	repo Repo,
+	state *RepoState,
+	headSHA string,
+) {
+	taskID := DeriveTaskID(repo.Owner, repo.Name, headSHA)
+	if err := w.completeSender.SendCommand(ctx, task.CompleteCommand{
+		TaskIdentifier: agentlib.TaskIdentifier(taskID.String()),
+	}); err != nil {
+		w.metrics.IncCompleted("error")
+		glog.Errorf(
+			"complete-task: publish failed repo=%s/%s sha=%s taskID=%s err=%v",
+			repo.Owner,
+			repo.Name,
+			headSHA,
+			taskID,
+			err,
+		)
+		return
+	}
+	w.metrics.IncCompleted("complete")
+	// Merge into the existing RepoState in place — preserve every field
+	// (LastSeenHeadSHA, plus any future additions) and only advance the
+	// completed marker.
+	state.CompletedHeadSHA = headSHA
+	glog.V(2).Infof(
+		"complete-task: published repo=%s/%s sha=%s taskID=%s",
+		repo.Owner,
+		repo.Name,
+		headSHA,
+		taskID,
+	)
 }
 
 // dropRepo logs the always-on per-repo drop line. The phrase

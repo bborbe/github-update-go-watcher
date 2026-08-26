@@ -105,10 +105,12 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	metrics := pkg.NewMetrics(nil)
 	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix)
+	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix)
 	w := factory.CreateWatcher(
 		httpClient,
 		factory.CreateGoDevHTTPClient(),
 		sender,
+		completeSender,
 		metrics,
 		a.CursorPath,
 		a.Owner,
