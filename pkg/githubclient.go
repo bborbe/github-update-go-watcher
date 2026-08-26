@@ -327,11 +327,27 @@ func (c *githubClient) GetMergedUpdatePR(
 	}
 	prs, _, err := c.client.PullRequests.List(ctx, repo.Owner, repo.Name, opts)
 	if err != nil {
-		return false, c.wrapRateLimitErr(
+		if isRateLimitError(err) {
+			return false, ErrRateLimited
+		}
+		glog.Warningf(
+			"list pull requests %s head=%s failed: %v",
+			repo.String(),
+			updateBranchName(headSHA),
+			err,
+		)
+		return false, errors.Wrapf(
 			ctx, err, "list pull requests %s head=%s", repo.String(), updateBranchName(headSHA),
 		)
 	}
 	for _, pr := range prs {
+		select {
+		case <-ctx.Done():
+			return false, errors.Wrap(
+				ctx, ctx.Err(), "context cancelled during GetMergedUpdatePR",
+			)
+		default:
+		}
 		if pr.GetMerged() {
 			return true, nil
 		}

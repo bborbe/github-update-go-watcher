@@ -124,6 +124,12 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 	// same way it does during processRepos — one throttle is shared.
 	if reason := w.completeMergedUpdates(ctx, cursorState, repos); reason != "" {
 		w.metrics.IncPollCycle(reason)
+		// Persist cursor mutations made before the abort (completed-head
+		// markers) so a completion already published this cycle is not
+		// re-published next cycle after a lost in-memory state.
+		if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
+			glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
+		}
 		return nil
 	}
 
@@ -290,7 +296,7 @@ func (w *watcher) completeMergedUpdates(
 			continue
 		}
 
-		w.completeTask(ctx, cursorState, repo, state, state.LastSeenHeadSHA)
+		w.completeTask(ctx, repo, state, state.LastSeenHeadSHA)
 	}
 	return ""
 }
@@ -302,7 +308,6 @@ func (w *watcher) completeMergedUpdates(
 // logged and counted, never fatal to the poll.
 func (w *watcher) completeTask(
 	ctx context.Context,
-	cursorState *Cursor,
 	repo Repo,
 	state *RepoState,
 	headSHA string,
@@ -323,13 +328,10 @@ func (w *watcher) completeTask(
 		return
 	}
 	w.metrics.IncCompleted("complete")
-	if cursorState.Repos == nil {
-		cursorState.Repos = make(map[string]*RepoState)
-	}
-	cursorState.Repos[repo.Key()] = &RepoState{
-		LastSeenHeadSHA:  state.LastSeenHeadSHA,
-		CompletedHeadSHA: headSHA,
-	}
+	// Merge into the existing RepoState in place — preserve every field
+	// (LastSeenHeadSHA, plus any future additions) and only advance the
+	// completed marker.
+	state.CompletedHeadSHA = headSHA
 	glog.V(2).Infof(
 		"complete-task: published repo=%s/%s sha=%s taskID=%s",
 		repo.Owner,
