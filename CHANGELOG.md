@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.4.0
 
 - feat: opt into `autoMerge.trivial` — mechanically trivial update PRs (go.mod / Dockerfile / CHANGELOG / workflow bumps) get the auto-merge label from github-pr-watcher, so GitHub-native auto-merge lands them once checks + review are green
 
