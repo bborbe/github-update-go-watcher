@@ -542,8 +542,11 @@ var _ = Describe("GitHubClient", func() {
 						return
 					}
 					w.Header().Set("Content-Type", "application/json")
+					// Real GitHub list API: merged is null in list responses;
+					// only merged_at is populated (detail view carries
+					// merged: true, List never does) — regression guard.
 					fmt.Fprint(w, `[
-						{"number": 1, "state": "merged", "merged": true, "head": {"ref": "fix/update-go-d630ef3"}}
+						{"number": 1, "state": "closed", "merged": null, "merged_at": "2026-08-27T06:52:33Z", "head": {"ref": "fix/update-go-d630ef3"}}
 					]`)
 				})
 				server = httptest.NewServer(handler)
@@ -573,7 +576,7 @@ var _ = Describe("GitHubClient", func() {
 				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					fmt.Fprint(w, `[
-						{"number": 1, "state": "open", "merged": false, "head": {"ref": "fix/update-go-d630ef3"}}
+						{"number": 1, "state": "open", "merged": null, "head": {"ref": "fix/update-go-d630ef3"}}
 					]`)
 				})
 				server = httptest.NewServer(handler)
