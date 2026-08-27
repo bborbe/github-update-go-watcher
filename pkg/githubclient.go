@@ -348,7 +348,7 @@ func (c *githubClient) GetMergedUpdatePR(
 			)
 		default:
 		}
-		if pr.GetMerged() {
+		if pr.MergedAt != nil {
 			return true, nil
 		}
 	}

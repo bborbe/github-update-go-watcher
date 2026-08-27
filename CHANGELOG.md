@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: detect merged update PRs via `merged_at`, not `merged` — the GitHub list API returns `merged: null` even for merged PRs (only the detail view populates it), so `GetMerged()` always read false and the merge-detection pass silently skipped every merged PR; checking `merged_at` (populated on list responses) makes complete-task actually fire
+
 ## v0.4.0
 
 - feat: opt into `autoMerge.trivial` — mechanically trivial update PRs (go.mod / Dockerfile / CHANGELOG / workflow bumps) get the auto-merge label from github-pr-watcher, so GitHub-native auto-merge lands them once checks + review are green
