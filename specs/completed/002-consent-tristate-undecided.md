@@ -1,11 +1,13 @@
 ---
-status: prompted
+status: completed
 tags:
     - dark-factory
     - spec
 approved: "2026-08-31T10:02:36Z"
 generating: "2026-08-31T11:01:47Z"
 prompted: "2026-08-31T11:01:47Z"
+verifying: "2026-08-31T12:52:45Z"
+completed: "2026-08-31T12:52:53Z"
 branch: dark-factory/consent-tristate-undecided
 ---
 
