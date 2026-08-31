@@ -177,4 +177,67 @@ var _ = Describe("taskbuilder", func() {
 			Expect(realCmd.Body).NotTo(ContainSubstring("require"))
 		})
 	})
+
+	Describe("ComputeDecisionTaskTitle", func() {
+		It("returns the frozen decision-task title form", func() {
+			title := pkg.ComputeDecisionTaskTitle(candidate)
+			Expect(title).To(Equal("Go Update Decision bborbe-disk-status"))
+		})
+	})
+
+	Describe("BuildDecisionCommand", func() {
+		It("returns nil from Validate", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Validate(ctx)).To(Succeed())
+		})
+
+		It("sets task_type to github-update-go-decision", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Frontmatter["task_type"]).To(Equal("github-update-go-decision"))
+		})
+
+		It("sets assignee to bborbe, never the update agent", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Frontmatter["assignee"]).To(Equal("bborbe"))
+			Expect(cmd.Frontmatter["assignee"]).NotTo(Equal("github-update-go-agent"))
+		})
+
+		It("has exactly 10 frontmatter keys", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(len(cmd.Frontmatter)).To(Equal(10))
+		})
+
+		It("derives task_identifier from owner/repo only, independent of HeadSHA", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			other := candidate
+			other.HeadSHA = "0000000000000000000000000000000000000000"
+			otherCmd := pkg.BuildDecisionCommand(other, cfg)
+			Expect(otherCmd.TaskIdentifier).To(Equal(cmd.TaskIdentifier))
+		})
+
+		It("task_identifier does not contain the HeadSHA", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(string(cmd.TaskIdentifier)).NotTo(ContainSubstring(candidate.HeadSHA))
+		})
+
+		It("different repos yield different task_identifier", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			other := candidate
+			other.Repo.Name = "other-repo"
+			otherCmd := pkg.BuildDecisionCommand(other, cfg)
+			Expect(otherCmd.TaskIdentifier).NotTo(Equal(cmd.TaskIdentifier))
+		})
+
+		It("body names the current and latest Go versions", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Body).To(ContainSubstring("1.24.0"))
+			Expect(cmd.Body).To(ContainSubstring("1.26.6"))
+		})
+
+		It("body shows both opt-in and opt-out .maintainer.yaml answers", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Body).To(ContainSubstring("autoUpdate: true"))
+			Expect(cmd.Body).To(ContainSubstring("autoUpdate: false"))
+		})
+	})
 })

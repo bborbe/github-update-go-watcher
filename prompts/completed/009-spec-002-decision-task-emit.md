@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [002-consent-tristate-undecided]
+summary: 'Added decision-task pathway: repo-keyed DeriveDecisionTaskID, BuildDecisionCommand/10-key frontmatter, TaskPublisher.PublishDecision, and watcher skip-with-emit on auto_update_undecided, with full test coverage and CHANGELOG entry'
+execution_id: github-update-go-watcher-tristate-exec-009-spec-002-decision-task-emit
+dark-factory-version: dev
 created: "2026-08-31T10:33:16Z"
 queued: "2026-08-31T11:22:11Z"
+started: "2026-08-31T11:39:54Z"
+completed: "2026-08-31T11:47:02Z"
 ---
 
 <summary>

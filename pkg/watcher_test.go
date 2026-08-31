@@ -129,6 +129,44 @@ var _ = Describe("watcher", func() {
 			})
 		})
 
+		Context("undecided repo skip-with-emit (spec 002 Desired Behaviors 5, 6)", func() {
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.UndecidedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				metrics.IncFilterSkippedStub = func(string) {}
+				buildWatcher()
+			})
+
+			It("publishes exactly one decision task and zero update tasks", func() {
+				publisher.PublishDecisionReturns(true)
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(publisher.PublishDecisionCallCount()).To(Equal(1))
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+			})
+
+			It("records reason auto_update_undecided", func() {
+				publisher.PublishDecisionReturns(true)
+				_ = watcher.Poll(context.Background(), false)
+				Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
+				arg := metrics.IncFilterSkippedArgsForCall(0)
+				Expect(arg).To(Equal("auto_update_undecided"))
+			})
+
+			It("a failed decision publish does not fail the poll cycle", func() {
+				publisher.PublishDecisionReturns(false)
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
 		Context("AC6 version table", func() {
 			BeforeEach(func() {
 				ghClient.ListReposReturns([]pkg.Repo{

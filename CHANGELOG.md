@@ -10,6 +10,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+- feat: add a decision-task pathway for undecided-consent repos — an `auto_update_undecided` skip now additionally publishes one repo-keyed decision task (`DeriveDecisionTaskID`, `BuildDecisionCommand`, `TaskPublisher.PublishDecision`) with type `github-update-go-decision` assigned to `bborbe`, whose body tells the owner how to opt in/out via `goUpdate.autoUpdate` in `.maintainer.yaml`; identity derives from owner/repo only (never the HEAD SHA), so re-emission every cycle is a downstream no-op and a failed publish never fails the poll cycle
 - feat: rename `Candidate.AutoUpdate bool` to `Candidate.Consent filter.Consent` and make `filter.NewAutoUpdateFilter` a tri-state gate — explicit `autoUpdate: false` still yields `auto_update_disabled`, while absent/undecided consent (and any invalid value) now yields a distinct `auto_update_undecided` reason (fails closed); `GoBehindFilter` still short-circuits repos already current on Go before the consent verdict is ever reached
 - feat: Add tri-state `filter.Consent` (`granted`/`refused`/`undecided`) and `filter.ParseConsent` — `GetMaintainerConfig` now returns `filter.Consent` instead of `maintainerconfig.MaintainerConfig`, walking `.maintainer.yaml` as a raw yaml.Node so an absent or non-boolean `goUpdate.autoUpdate` no longer collapses with an explicit `false`
 

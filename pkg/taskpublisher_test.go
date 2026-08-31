@@ -95,6 +95,56 @@ var _ = Describe("taskpublisher", func() {
 			})
 		})
 	})
+
+	Describe("PublishDecision", func() {
+		Context("on send success", func() {
+			It("returns true", func() {
+				Expect(publisher.PublishDecision(ctx, candidate)).To(BeTrue())
+			})
+
+			It("captures one command", func() {
+				publisher.PublishDecision(ctx, candidate)
+				Expect(len(sender.SentCommands)).To(Equal(1))
+			})
+
+			It("IncPublished called with create", func() {
+				publisher.PublishDecision(ctx, candidate)
+				Expect(metrics.IncPublishedCallCount()).To(Equal(1))
+				label := metrics.IncPublishedArgsForCall(0)
+				Expect(label).To(Equal("create"))
+			})
+
+			It("sends a command with task_type github-update-go-decision", func() {
+				publisher.PublishDecision(ctx, candidate)
+				cmd := sender.SentCommands[0]
+				Expect(cmd.Frontmatter["task_type"]).To(Equal("github-update-go-decision"))
+			})
+
+			It("sends a command assigned to bborbe, not the update agent", func() {
+				publisher.PublishDecision(ctx, candidate)
+				cmd := sender.SentCommands[0]
+				Expect(cmd.Frontmatter["assignee"]).To(Equal("bborbe"))
+				Expect(cmd.Frontmatter["assignee"]).NotTo(Equal("github-update-go-agent"))
+			})
+		})
+
+		Context("on send error", func() {
+			BeforeEach(func() {
+				sender.SendError = errors.New("send failed")
+			})
+
+			It("returns false", func() {
+				Expect(publisher.PublishDecision(ctx, candidate)).To(BeFalse())
+			})
+
+			It("IncPublished called with error", func() {
+				publisher.PublishDecision(ctx, candidate)
+				Expect(metrics.IncPublishedCallCount()).To(Equal(1))
+				label := metrics.IncPublishedArgsForCall(0)
+				Expect(label).To(Equal("error"))
+			})
+		})
+	})
 })
 
 // fakeTaskPublisherSender implements task.CreateCommandSender for testing.
