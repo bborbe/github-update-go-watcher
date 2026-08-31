@@ -19,7 +19,7 @@ A repo is only acted on when **both** hold:
 1. **`REPO_ALLOWLIST`** (env, host-qualified, validated via `github.com/bborbe/maintainer/repoallowlist`) — the operator's scope. Empty means allow-all within `OWNER`.
 2. **`.maintainer.yaml: goUpdate.autoUpdate: true`** in the target repo — the repo owner's consent.
 
-The second is a **trust gate**: a repo with no `.maintainer.yaml`, no `goUpdate:` section, or `autoUpdate` absent/false is skipped. Opt-in, never opt-out — this watcher causes code to be committed to the target repo, so it does not act without explicit consent.
+The second is a **trust gate**: a repo with `autoUpdate: false`, explicitly set, is skipped and stays silent. A repo whose owner has never answered at all — no `.maintainer.yaml`, no `goUpdate:` section, no `autoUpdate` key, or a non-boolean value — is also skipped, but additionally gets a one-time decision task filed asking the owner to answer (see [Decision task contract](#decision-task-contract)). Opt-in, never opt-out — this watcher causes code to be committed to the target repo, so it does not act without explicit consent, and it never defaults an unanswered repo to consent.
 
 Same shape as `github-release-watcher`'s `release.autoRelease` gate. See the [Watcher Writing Guide] rule: gate on `.maintainer.yaml` when the watcher initiates repo-modifying work with no per-change human trigger.
 
@@ -75,7 +75,8 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `no_gomod` | Repo has no `go.mod` file |
 | `gomod_unparsable` | `go.mod` exists but its go directive is unreadable |
 | `go_current` | Declared Go version is at or ahead of stable |
-| `auto_update_disabled` | Repo has no `goUpdate.autoUpdate: true` in `.maintainer.yaml` |
+| `auto_update_disabled` | Repo has `goUpdate.autoUpdate: false` explicitly set in `.maintainer.yaml` |
+| `auto_update_undecided` | `.maintainer.yaml` is absent, has no `goUpdate:` section, has no `autoUpdate` key, or the key holds a non-boolean value — the owner has never answered. A decision task is filed once per repo (see [Decision task contract](#decision-task-contract)) |
 | `sha_unchanged` | Repo HEAD SHA has not changed since last successful cycle (not evaluated on forced cycles) |
 
 ## Emitted task contract
@@ -107,6 +108,27 @@ Body (byte-for-byte, two spaces either side of the middot `·`):
 **HEAD:** <sha[:7]>
 **Repo:** [<owner>/<repo>](https://github.com/<owner>/<repo>)
 ```
+
+## Decision task contract
+
+When a repo's consent is undecided (see [Skip reasons](#skip-reasons)), the watcher publishes a second, distinct `CreateTaskCommand` shape — a decision task addressed to a human, not to the update agent. Re-emitted every cycle the repo stays undecided; the task identifier is derived from `(owner, repo)` only (no HEAD SHA), so a re-emit is a downstream no-op, not a duplicate.
+
+The command's frontmatter carries exactly these ten keys:
+
+| Key | Value |
+|---|---|
+| `task_type` | `github-update-go-decision` |
+| `assignee` | `bborbe` (never `github-update-go-agent` — this is a human decision, not agent work) |
+| `phase` | `planning` |
+| `status` | `in_progress` |
+| `stage` | `<STAGE>` (`dev` or `prod`) |
+| `task_identifier` | deterministic UUID5 derived from `(owner, repo)` only |
+| `title` | `Go Update Decision <owner>-<repo>` (no HEAD SHA) |
+| `repo` | `<owner>/<repo>` |
+| `current_go` | normalised three-part current Go version (e.g. `1.24.0`) |
+| `latest_go` | current stable three-part Go version (e.g. `1.26.6`) |
+
+Body: a short explanation plus both `.maintainer.yaml` answers (`autoUpdate: true` to opt in, `autoUpdate: false` to opt out) — either answer stops future decision tasks for that repo.
 
 ## Endpoints
 

@@ -662,13 +662,9 @@ var _ = Describe("watcher", func() {
 
 				_ = watcher.Poll(context.Background(), false)
 
-				validLabels := map[string]bool{
-					"scope":                true,
-					"no_gomod":             true,
-					"gomod_unparsable":     true,
-					"go_current":           true,
-					"auto_update_disabled": true,
-					"sha_unchanged":        true,
+				validLabels := map[string]bool{}
+				for _, reason := range pkg.FilterSkipReasons {
+					validLabels[reason] = true
 				}
 				for _, arg := range filterSkipArgs {
 					Expect(validLabels[arg]).To(BeTrue(),

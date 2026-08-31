@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [002-consent-tristate-undecided]
+summary: Added auto_update_undecided to FilterSkipReasons so filter_skipped_total pre-initialises the new series to 0, with a pre-init test, README tri-state docs (skip table, trust gate, decision task contract), watcher_test label derivation from the real slice, and a CHANGELOG entry
+execution_id: github-update-go-watcher-tristate-exec-010-spec-002-metrics-readme
+dark-factory-version: dev
 created: "2026-08-31T10:33:16Z"
 queued: "2026-08-31T11:22:11Z"
+started: "2026-08-31T11:47:03Z"
+completed: "2026-08-31T11:51:19Z"
 ---
 
 <summary>
