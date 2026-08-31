@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [002-consent-tristate-undecided]
+summary: Replaced Candidate.AutoUpdate bool with tri-state filter.Consent throughout; rewrote NewAutoUpdateFilter as a fail-closed three-way switch (auto_update_disabled for refused, auto_update_undecided for undecided/invalid); proved GoBehindFilter short-circuits current-on-Go repos before the consent verdict; updated all fixtures, CHANGELOG, and watcher/filter tests.
+execution_id: github-update-go-watcher-tristate-exec-008-spec-002-filter-verdict
+dark-factory-version: dev
 created: "2026-08-31T10:33:16Z"
 queued: "2026-08-31T11:22:11Z"
+started: "2026-08-31T11:33:48Z"
+completed: "2026-08-31T11:39:52Z"
 ---
 
 <summary>

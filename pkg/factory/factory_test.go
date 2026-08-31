@@ -32,7 +32,7 @@ var _ = Describe("Factory", func() {
 				GoModPresent:  true,
 				GoModParsable: true,
 				GoBehind:      true,
-				AutoUpdate:    true,
+				Consent:       filter.GrantedConsent,
 			}
 			reason := f.Skip(candidate)
 			Expect(reason).To(BeEmpty())
@@ -54,7 +54,7 @@ var _ = Describe("Factory", func() {
 				GoModPresent:  true,
 				GoModParsable: true,
 				GoBehind:      true,
-				AutoUpdate:    true,
+				Consent:       filter.GrantedConsent,
 			}
 			reason := f.Skip(candidate)
 			Expect(reason).To(Equal("scope"))
@@ -67,7 +67,7 @@ var _ = Describe("Factory", func() {
 				GoModPresent:  true,
 				GoModParsable: true,
 				GoBehind:      true,
-				AutoUpdate:    true,
+				Consent:       filter.GrantedConsent,
 			}
 			reason := f.Skip(candidate)
 			Expect(reason).To(BeEmpty())

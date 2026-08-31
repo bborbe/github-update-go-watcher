@@ -10,6 +10,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+- feat: rename `Candidate.AutoUpdate bool` to `Candidate.Consent filter.Consent` and make `filter.NewAutoUpdateFilter` a tri-state gate — explicit `autoUpdate: false` still yields `auto_update_disabled`, while absent/undecided consent (and any invalid value) now yields a distinct `auto_update_undecided` reason (fails closed); `GoBehindFilter` still short-circuits repos already current on Go before the consent verdict is ever reached
 - feat: Add tri-state `filter.Consent` (`granted`/`refused`/`undecided`) and `filter.ParseConsent` — `GetMaintainerConfig` now returns `filter.Consent` instead of `maintainerconfig.MaintainerConfig`, walking `.maintainer.yaml` as a raw yaml.Node so an absent or non-boolean `goUpdate.autoUpdate` no longer collapses with an explicit `false`
 
 ## v0.4.1

@@ -14,6 +14,7 @@ import (
 
 	"github.com/bborbe/github-update-go-watcher/mocks"
 	"github.com/bborbe/github-update-go-watcher/pkg"
+	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
 var _ = Describe("taskpublisher", func() {
@@ -50,7 +51,7 @@ var _ = Describe("taskpublisher", func() {
 				Patch: 6,
 				Raw:   "1.26.6",
 			},
-			AutoUpdate: true,
+			Consent: filter.GrantedConsent,
 		}
 	})
 

@@ -77,7 +77,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			DescribeTable("consent matrix",
-				func(consent filter.Consent, expectPublish bool) {
+				func(consent filter.Consent, expectPublish bool, expectedReason string) {
 					ghClient.GetMaintainerConfigReturns(consent, nil)
 					publisher.PublishCreateReturns(true)
 					metrics.IncFilterSkippedStub = func(string) {}
@@ -87,21 +87,46 @@ var _ = Describe("watcher", func() {
 
 					if expectPublish {
 						Expect(publisher.PublishCreateCallCount()).To(Equal(1))
-					} else {
-						Expect(publisher.PublishCreateCallCount()).To(Equal(0))
-						if consent != filter.GrantedConsent {
-							Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
-							arg := metrics.IncFilterSkippedArgsForCall(0)
-							Expect(arg).To(Equal("auto_update_disabled"))
-						}
+						return
 					}
+					Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+					Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
+					arg := metrics.IncFilterSkippedArgsForCall(0)
+					Expect(arg).To(Equal(expectedReason))
 				},
-				Entry("maintainer file absent", filter.UndecidedConsent, false),
-				Entry("goUpdate section absent", filter.UndecidedConsent, false),
-				Entry("autoUpdate key absent", filter.UndecidedConsent, false),
-				Entry("autoUpdate false", filter.RefusedConsent, false),
-				Entry("autoUpdate true", filter.GrantedConsent, true),
+				Entry("maintainer file absent",
+					filter.UndecidedConsent, false, "auto_update_undecided"),
+				Entry("goUpdate section absent",
+					filter.UndecidedConsent, false, "auto_update_undecided"),
+				Entry("autoUpdate key absent",
+					filter.UndecidedConsent, false, "auto_update_undecided"),
+				Entry("autoUpdate false",
+					filter.RefusedConsent, false, "auto_update_disabled"),
+				Entry("autoUpdate true",
+					filter.GrantedConsent, true, ""),
 			)
+
+			It("undecided repo already current on Go emits nothing (AC6, DB9)", func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
+				ghClient.GetGoModReturns([]byte("module x\n\ngo 1.26.6\n"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.UndecidedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				buildWatcher()
+
+				_ = watcher.Poll(context.Background(), false)
+
+				// GoBehindFilter (chain position 4) short-circuits before the consent
+				// filter (position 5), so the verdict is go_current, not
+				// auto_update_undecided.
+				Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
+				Expect(metrics.IncFilterSkippedArgsForCall(0)).To(Equal("go_current"))
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+			})
 		})
 
 		Context("AC6 version table", func() {

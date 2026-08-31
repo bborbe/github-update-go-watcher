@@ -222,10 +222,7 @@ func (w *watcher) gatherCandidate(
 		Repo:     repo,
 		HeadSHA:  headSHA,
 		LatestGo: latestGo,
-		// Candidate.AutoUpdate stays a bool in this prompt (renamed to a
-		// filter.Consent field in a later prompt). This collapse is a
-		// deliberately temporary bridge so nothing observable changes yet.
-		AutoUpdate: consent == filter.GrantedConsent,
+		Consent:  consent,
 	}
 	if goModContent != nil {
 		candidate.GoModPresent = true

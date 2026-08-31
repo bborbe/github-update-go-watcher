@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/bborbe/github-update-go-watcher/pkg"
+	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
 var _ = Describe("taskbuilder", func() {
@@ -44,7 +45,7 @@ var _ = Describe("taskbuilder", func() {
 				Patch: 6,
 				Raw:   "1.26.6",
 			},
-			AutoUpdate: true,
+			Consent: filter.GrantedConsent,
 		}
 		cfg = pkg.TaskConfig{Stage: "dev"}
 		goldenBody = "# Update Go: bborbe/disk-status\n\n" +
