@@ -26,7 +26,8 @@ type Metrics interface {
 	IncReposScanned(n int)
 
 	// IncFilterSkipped — reason: "scope" | "no_gomod" | "gomod_unparsable" |
-	// "go_current" | "auto_update_disabled" | "sha_unchanged"
+	// "go_current" | "auto_update_disabled" | "auto_update_undecided" |
+	// "sha_unchanged"
 	IncFilterSkipped(reason string)
 }
 
@@ -50,6 +51,7 @@ var (
 		"gomod_unparsable",
 		"go_current",
 		"auto_update_disabled",
+		"auto_update_undecided",
 		"sha_unchanged",
 	}
 )

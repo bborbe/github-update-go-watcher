@@ -174,6 +174,20 @@ func (w *watcher) processRepos(
 				repo.Key(),
 				reason,
 			)
+			if reason == "auto_update_undecided" {
+				// Skip-with-emit (spec 002 Desired Behavior 5): the repo is
+				// still correctly counted and logged as skipped above; this
+				// additionally files a human-facing decision task. The
+				// return value is deliberately ignored — a failed publish
+				// here is absorbed exactly like a failed PublishCreate
+				// would be: the repo stays undecided and the same decision
+				// task is attempted again next cycle (spec 002 Failure
+				// Modes). No cursor/suppression state is written for this
+				// branch (spec 002 Desired Behavior 8) — DeriveDecisionTaskID
+				// is repo-keyed, so re-emitting it every cycle is already a
+				// downstream no-op.
+				w.publisher.PublishDecision(ctx, candidate)
+			}
 			continue
 		}
 
@@ -210,7 +224,7 @@ func (w *watcher) gatherCandidate(
 		return dropRepo(repo, "go_mod", err)
 	}
 
-	cfg, err := w.ghClient.GetMaintainerConfig(ctx, repo)
+	consent, err := w.ghClient.GetMaintainerConfig(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
 			return Candidate{}, "rate_limited", false
@@ -219,10 +233,10 @@ func (w *watcher) gatherCandidate(
 	}
 
 	candidate := Candidate{
-		Repo:       repo,
-		HeadSHA:    headSHA,
-		LatestGo:   latestGo,
-		AutoUpdate: cfg.GoUpdate.AutoUpdate,
+		Repo:     repo,
+		HeadSHA:  headSHA,
+		LatestGo: latestGo,
+		Consent:  consent,
 	}
 	if goModContent != nil {
 		candidate.GoModPresent = true

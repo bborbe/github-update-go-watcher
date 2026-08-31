@@ -162,14 +162,29 @@ var _ = Describe("GoBehindFilter", func() {
 })
 
 var _ = Describe("AutoUpdateFilter", func() {
-	DescribeTable("consent matrix",
-		func(autoUpdate bool, expected string) {
+	DescribeTable(
+		"consent matrix",
+		func(consent filter.Consent, expected string) {
 			f := filter.NewAutoUpdateFilter()
-			reason := f.Skip(filter.Candidate{AutoUpdate: autoUpdate})
+			reason := f.Skip(filter.Candidate{Consent: consent})
 			Expect(reason).To(Equal(expected))
 		},
-		Entry("true passes", true, ""),
-		Entry("false returns auto_update_disabled", false, "auto_update_disabled"),
+		Entry("granted passes", filter.GrantedConsent, ""),
+		Entry(
+			"refused returns auto_update_disabled",
+			filter.RefusedConsent,
+			"auto_update_disabled",
+		),
+		Entry(
+			"undecided returns auto_update_undecided",
+			filter.UndecidedConsent,
+			"auto_update_undecided",
+		),
+		Entry(
+			"zero value fails closed to auto_update_undecided",
+			filter.Consent(""),
+			"auto_update_undecided",
+		),
 	)
 })
 
@@ -228,7 +243,7 @@ var _ = Describe("Closed set assertion", func() {
 			GoModPresent:  true,
 			GoModParsable: true,
 			GoBehind:      true,
-			AutoUpdate:    true,
+			Consent:       filter.GrantedConsent,
 		}
 		filters := []filter.TaskCreationFilter{
 			filter.NewRepoAllowlistFilter(nil),
@@ -265,9 +280,32 @@ var _ = Describe("Full chain ordering", func() {
 			GoModPresent:  false,
 			GoModParsable: false,
 			GoBehind:      false,
-			AutoUpdate:    false,
+			Consent:       filter.UndecidedConsent,
 		}
 		reason := filters.Skip(candidate)
 		Expect(reason).To(Equal("scope"))
+	})
+})
+
+var _ = Describe("GoBehindFilter short-circuits before the consent verdict (DB9)", func() {
+	It("reports go_current for an undecided repo already current on Go", func() {
+		filters := filter.TaskCreationFilterList{
+			filter.NewRepoAllowlistFilter(nil),
+			filter.NewGoModPresentFilter(),
+			filter.NewGoModParsableFilter(),
+			filter.NewGoBehindFilter(),
+			filter.NewAutoUpdateFilter(),
+			filter.NewSHAUnchangedFilter(&fakeCursor{}),
+		}
+		candidate := filter.Candidate{
+			RepoKey:       "github.com/bborbe/repo",
+			HeadSHA:       "abc123",
+			GoModPresent:  true,
+			GoModParsable: true,
+			GoBehind:      false,
+			Consent:       filter.UndecidedConsent,
+		}
+		reason := filters.Skip(candidate)
+		Expect(reason).To(Equal("go_current"))
 	})
 })

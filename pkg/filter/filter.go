@@ -11,7 +11,8 @@
 //  2. GoModPresentFilter   -> "no_gomod"             — repo has no go.mod
 //  3. GoModParsableFilter  -> "gomod_unparsable"     — go directive unreadable
 //  4. GoBehindFilter       -> "go_current"           — at or ahead of stable
-//  5. AutoUpdateFilter     -> "auto_update_disabled" — owner has not opted in
+//  5. AutoUpdateFilter     -> "auto_update_disabled" | "auto_update_undecided"
+//     — owner refused, or has not answered at all
 //  6. SHAUnchangedFilter   -> "sha_unchanged"        — HEAD already reported
 //
 // Filters 1-5 are cycle-invariant and built once at wiring time.
@@ -38,9 +39,11 @@ type Candidate struct {
 	// current stable release. The comparison itself lives in pkg.Version;
 	// only the verdict crosses into this package.
 	GoBehind bool
-	// AutoUpdate is `.maintainer.yaml: goUpdate.autoUpdate`. True is the ONLY
-	// value that passes the consent gate.
-	AutoUpdate bool
+	// Consent is the tri-state outcome of `.maintainer.yaml:
+	// goUpdate.autoUpdate` (spec 002). Only GrantedConsent passes the
+	// consent gate; RefusedConsent and UndecidedConsent are both skips, but
+	// with distinct reasons (see AutoUpdateFilter).
+	Consent Consent
 }
 
 // TaskCreationFilter decides whether a single Candidate should be skipped.

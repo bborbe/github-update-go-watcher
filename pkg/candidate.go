@@ -16,16 +16,16 @@ import (
 //  1. Repo         (from ListRepos)
 //  2. HeadSHA      (from GetHeadSHA)
 //  3. GoModPresent / GoModParsable / CurrentGo (from GetGoMod + ParseGoModVersion)
-//  4. AutoUpdate   (from GetMaintainerConfig — false when .maintainer.yaml is absent)
+//  4. Consent      (from GetMaintainerConfig — UndecidedConsent when .maintainer.yaml is absent)
 //  5. LatestGo     (resolved once per cycle, identical across every Candidate)
 type Candidate struct {
 	Repo          Repo
-	HeadSHA       string  // full SHA of the default branch HEAD
-	GoModPresent  bool    // false when the repo has no go.mod
-	GoModParsable bool    // false when go.mod exists but has no readable go directive
-	CurrentGo     Version // zero value unless GoModParsable
-	LatestGo      Version // current stable, resolved once per cycle
-	AutoUpdate    bool    // .maintainer.yaml: goUpdate.autoUpdate — the consent gate
+	HeadSHA       string         // full SHA of the default branch HEAD
+	GoModPresent  bool           // false when the repo has no go.mod
+	GoModParsable bool           // false when go.mod exists but has no readable go directive
+	CurrentGo     Version        // zero value unless GoModParsable
+	LatestGo      Version        // current stable, resolved once per cycle
+	Consent       filter.Consent // .maintainer.yaml: goUpdate.autoUpdate — the consent gate
 }
 
 // ShortSHA returns the first 7 chars of HeadSHA, used in the title and body.
@@ -50,6 +50,6 @@ func (c Candidate) FilterCandidate() filter.Candidate {
 		GoModPresent:  c.GoModPresent,
 		GoModParsable: c.GoModParsable,
 		GoBehind:      c.GoBehind(),
-		AutoUpdate:    c.AutoUpdate,
+		Consent:       c.Consent,
 	}
 }

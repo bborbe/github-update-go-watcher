@@ -21,6 +21,18 @@ type TaskPublisher struct {
 	publishCreateReturnsOnCall map[int]struct {
 		result1 bool
 	}
+	PublishDecisionStub        func(context.Context, pkg.Candidate) bool
+	publishDecisionMutex       sync.RWMutex
+	publishDecisionArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+	}
+	publishDecisionReturns struct {
+		result1 bool
+	}
+	publishDecisionReturnsOnCall map[int]struct {
+		result1 bool
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -83,6 +95,68 @@ func (fake *TaskPublisher) PublishCreateReturnsOnCall(i int, result1 bool) {
 		})
 	}
 	fake.publishCreateReturnsOnCall[i] = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishDecision(arg1 context.Context, arg2 pkg.Candidate) bool {
+	fake.publishDecisionMutex.Lock()
+	ret, specificReturn := fake.publishDecisionReturnsOnCall[len(fake.publishDecisionArgsForCall)]
+	fake.publishDecisionArgsForCall = append(fake.publishDecisionArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+	}{arg1, arg2})
+	stub := fake.PublishDecisionStub
+	fakeReturns := fake.publishDecisionReturns
+	fake.recordInvocation("PublishDecision", []interface{}{arg1, arg2})
+	fake.publishDecisionMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *TaskPublisher) PublishDecisionCallCount() int {
+	fake.publishDecisionMutex.RLock()
+	defer fake.publishDecisionMutex.RUnlock()
+	return len(fake.publishDecisionArgsForCall)
+}
+
+func (fake *TaskPublisher) PublishDecisionCalls(stub func(context.Context, pkg.Candidate) bool) {
+	fake.publishDecisionMutex.Lock()
+	defer fake.publishDecisionMutex.Unlock()
+	fake.PublishDecisionStub = stub
+}
+
+func (fake *TaskPublisher) PublishDecisionArgsForCall(i int) (context.Context, pkg.Candidate) {
+	fake.publishDecisionMutex.RLock()
+	defer fake.publishDecisionMutex.RUnlock()
+	argsForCall := fake.publishDecisionArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *TaskPublisher) PublishDecisionReturns(result1 bool) {
+	fake.publishDecisionMutex.Lock()
+	defer fake.publishDecisionMutex.Unlock()
+	fake.PublishDecisionStub = nil
+	fake.publishDecisionReturns = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishDecisionReturnsOnCall(i int, result1 bool) {
+	fake.publishDecisionMutex.Lock()
+	defer fake.publishDecisionMutex.Unlock()
+	fake.PublishDecisionStub = nil
+	if fake.publishDecisionReturnsOnCall == nil {
+		fake.publishDecisionReturnsOnCall = make(map[int]struct {
+			result1 bool
+		})
+	}
+	fake.publishDecisionReturnsOnCall[i] = struct {
 		result1 bool
 	}{result1}
 }

@@ -97,3 +97,68 @@ func buildTaskBody(c Candidate) string {
 		owner, name, owner, name,
 	)
 }
+
+// ComputeDecisionTaskTitle returns the frozen decision-task title form:
+// "Go Update Decision <owner>-<repo>" — no HEAD SHA, matching the
+// repo-keyed identity (spec 002 Desired Behavior 7).
+func ComputeDecisionTaskTitle(c Candidate) string {
+	return fmt.Sprintf("Go Update Decision %s-%s", c.Repo.Owner, c.Repo.Name)
+}
+
+// BuildDecisionCommand assembles the decision-task CreateTaskCommand for a
+// Candidate whose consent is undecided (spec 002 Desired Behaviors 5-8, 10).
+func BuildDecisionCommand(c Candidate, cfg TaskConfig) task.CreateCommand {
+	taskIDStr := DeriveDecisionTaskID(c.Repo.Owner, c.Repo.Name).String()
+	return task.CreateCommand{
+		Title:          ComputeDecisionTaskTitle(c),
+		TaskIdentifier: agentlib.TaskIdentifier(taskIDStr),
+		Frontmatter:    buildDecisionFrontmatter(c, taskIDStr, cfg),
+		Body:           buildDecisionTaskBody(c),
+	}
+}
+
+func buildDecisionFrontmatter(
+	c Candidate,
+	taskIDStr string,
+	cfg TaskConfig,
+) agentlib.TaskFrontmatter {
+	return agentlib.TaskFrontmatter{
+		"task_type":       "github-update-go-decision",
+		"assignee":        "bborbe",
+		"phase":           "planning",
+		"status":          "in_progress",
+		"stage":           cfg.Stage,
+		"task_identifier": taskIDStr,
+		"title":           ComputeDecisionTaskTitle(c),
+		"repo":            c.Repo.String(),
+		"current_go":      c.CurrentGo.Number(),
+		"latest_go":       c.LatestGo.Number(),
+	}
+}
+
+func buildDecisionTaskBody(c Candidate) string {
+	owner := c.Repo.Owner
+	name := c.Repo.Name
+	return fmt.Sprintf(
+		"# Go Update Decision Needed: %s/%s\n\n"+
+			"This repo's declared Go version is behind the latest stable release, "+
+			"and nobody has recorded whether it should be updated automatically.\n\n"+
+			"**Current Go:** %s  ·  **Latest Go:** %s\n"+
+			"**Repo:** [%s/%s](https://github.com/%s/%s)\n\n"+
+			"Add one of the following to `.maintainer.yaml` to answer:\n\n"+
+			"```yaml\n"+
+			"goUpdate:\n"+
+			"  autoUpdate: true   # opt in — this repo starts receiving automatic Go bump PRs\n"+
+			"```\n\n"+
+			"or\n\n"+
+			"```yaml\n"+
+			"goUpdate:\n"+
+			"  autoUpdate: false  # opt out — this repo stays silent going forward\n"+
+			"```\n\n"+
+			"Either answer makes this repo silent again; only an unanswered decision "+
+			"re-files this task on the next scan.\n",
+		owner, name,
+		c.CurrentGo.Number(), c.LatestGo.Number(),
+		owner, name, owner, name,
+	)
+}

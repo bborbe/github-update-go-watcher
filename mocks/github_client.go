@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/bborbe/github-update-go-watcher/pkg"
-	"github.com/bborbe/maintainer/maintainerconfig"
+	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
 type GitHubClient struct {
@@ -38,18 +38,18 @@ type GitHubClient struct {
 		result1 string
 		result2 error
 	}
-	GetMaintainerConfigStub        func(context.Context, pkg.Repo) (maintainerconfig.MaintainerConfig, error)
+	GetMaintainerConfigStub        func(context.Context, pkg.Repo) (filter.Consent, error)
 	getMaintainerConfigMutex       sync.RWMutex
 	getMaintainerConfigArgsForCall []struct {
 		arg1 context.Context
 		arg2 pkg.Repo
 	}
 	getMaintainerConfigReturns struct {
-		result1 maintainerconfig.MaintainerConfig
+		result1 filter.Consent
 		result2 error
 	}
 	getMaintainerConfigReturnsOnCall map[int]struct {
-		result1 maintainerconfig.MaintainerConfig
+		result1 filter.Consent
 		result2 error
 	}
 	GetMergedUpdatePRStub        func(context.Context, pkg.Repo, string) (bool, error)
@@ -215,7 +215,7 @@ func (fake *GitHubClient) GetHeadSHAReturnsOnCall(i int, result1 string, result2
 	}{result1, result2}
 }
 
-func (fake *GitHubClient) GetMaintainerConfig(arg1 context.Context, arg2 pkg.Repo) (maintainerconfig.MaintainerConfig, error) {
+func (fake *GitHubClient) GetMaintainerConfig(arg1 context.Context, arg2 pkg.Repo) (filter.Consent, error) {
 	fake.getMaintainerConfigMutex.Lock()
 	ret, specificReturn := fake.getMaintainerConfigReturnsOnCall[len(fake.getMaintainerConfigArgsForCall)]
 	fake.getMaintainerConfigArgsForCall = append(fake.getMaintainerConfigArgsForCall, struct {
@@ -241,7 +241,7 @@ func (fake *GitHubClient) GetMaintainerConfigCallCount() int {
 	return len(fake.getMaintainerConfigArgsForCall)
 }
 
-func (fake *GitHubClient) GetMaintainerConfigCalls(stub func(context.Context, pkg.Repo) (maintainerconfig.MaintainerConfig, error)) {
+func (fake *GitHubClient) GetMaintainerConfigCalls(stub func(context.Context, pkg.Repo) (filter.Consent, error)) {
 	fake.getMaintainerConfigMutex.Lock()
 	defer fake.getMaintainerConfigMutex.Unlock()
 	fake.GetMaintainerConfigStub = stub
@@ -254,28 +254,28 @@ func (fake *GitHubClient) GetMaintainerConfigArgsForCall(i int) (context.Context
 	return argsForCall.arg1, argsForCall.arg2
 }
 
-func (fake *GitHubClient) GetMaintainerConfigReturns(result1 maintainerconfig.MaintainerConfig, result2 error) {
+func (fake *GitHubClient) GetMaintainerConfigReturns(result1 filter.Consent, result2 error) {
 	fake.getMaintainerConfigMutex.Lock()
 	defer fake.getMaintainerConfigMutex.Unlock()
 	fake.GetMaintainerConfigStub = nil
 	fake.getMaintainerConfigReturns = struct {
-		result1 maintainerconfig.MaintainerConfig
+		result1 filter.Consent
 		result2 error
 	}{result1, result2}
 }
 
-func (fake *GitHubClient) GetMaintainerConfigReturnsOnCall(i int, result1 maintainerconfig.MaintainerConfig, result2 error) {
+func (fake *GitHubClient) GetMaintainerConfigReturnsOnCall(i int, result1 filter.Consent, result2 error) {
 	fake.getMaintainerConfigMutex.Lock()
 	defer fake.getMaintainerConfigMutex.Unlock()
 	fake.GetMaintainerConfigStub = nil
 	if fake.getMaintainerConfigReturnsOnCall == nil {
 		fake.getMaintainerConfigReturnsOnCall = make(map[int]struct {
-			result1 maintainerconfig.MaintainerConfig
+			result1 filter.Consent
 			result2 error
 		})
 	}
 	fake.getMaintainerConfigReturnsOnCall[i] = struct {
-		result1 maintainerconfig.MaintainerConfig
+		result1 filter.Consent
 		result2 error
 	}{result1, result2}
 }
