@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	taskmocks "github.com/bborbe/agent/mocks"
-	"github.com/bborbe/maintainer/maintainerconfig"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -78,8 +77,8 @@ var _ = Describe("watcher", func() {
 			})
 
 			DescribeTable("consent matrix",
-				func(cfg maintainerconfig.MaintainerConfig, expectPublish bool) {
-					ghClient.GetMaintainerConfigReturns(cfg, nil)
+				func(consent filter.Consent, expectPublish bool) {
+					ghClient.GetMaintainerConfigReturns(consent, nil)
 					publisher.PublishCreateReturns(true)
 					metrics.IncFilterSkippedStub = func(string) {}
 
@@ -90,24 +89,18 @@ var _ = Describe("watcher", func() {
 						Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 					} else {
 						Expect(publisher.PublishCreateCallCount()).To(Equal(0))
-						if !cfg.GoUpdate.AutoUpdate {
+						if consent != filter.GrantedConsent {
 							Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
 							arg := metrics.IncFilterSkippedArgsForCall(0)
 							Expect(arg).To(Equal("auto_update_disabled"))
 						}
 					}
 				},
-				Entry("maintainer file absent", maintainerconfig.MaintainerConfig{}, false),
-				Entry("goUpdate section absent", maintainerconfig.MaintainerConfig{}, false),
-				Entry("autoUpdate key absent", maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{},
-				}, false),
-				Entry("autoUpdate false", maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: false},
-				}, false),
-				Entry("autoUpdate true", maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, true),
+				Entry("maintainer file absent", filter.UndecidedConsent, false),
+				Entry("goUpdate section absent", filter.UndecidedConsent, false),
+				Entry("autoUpdate key absent", filter.UndecidedConsent, false),
+				Entry("autoUpdate false", filter.RefusedConsent, false),
+				Entry("autoUpdate true", filter.GrantedConsent, true),
 			)
 		})
 
@@ -117,9 +110,7 @@ var _ = Describe("watcher", func() {
 					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -190,9 +181,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("abc123", nil)
 				ghClient.GetGoModReturns([]byte("go 1.20"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -274,7 +263,7 @@ var _ = Describe("watcher", func() {
 					ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 					ghClient.GetGoModReturns([]byte("go 1.24"), nil)
 					ghClient.GetMaintainerConfigReturns(
-						maintainerconfig.MaintainerConfig{},
+						filter.Consent(""),
 						pkg.ErrRateLimited,
 					)
 				}),
@@ -290,9 +279,7 @@ var _ = Describe("watcher", func() {
 					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
 					{Owner: "bborbe", Name: "other-repo", DefaultBranch: "main"},
 				}, nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -332,7 +319,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
 				ghClient.GetMaintainerConfigReturns(
-					maintainerconfig.MaintainerConfig{},
+					filter.Consent(""),
 					errors.New("parse error"),
 				)
 				goDevClient.LatestStableReturns(pkg.Version{
@@ -342,15 +329,14 @@ var _ = Describe("watcher", func() {
 				buildWatcher()
 			})
 
-			It("no publish and no auto_update_disabled recorded", func() {
+			It("no publish and IncFilterSkipped never called (drop, not a skip verdict)", func() {
 				err := watcher.Poll(context.Background(), false)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
-				// IncFilterSkipped should not have been called with auto_update_disabled
-				for i := 0; i < metrics.IncFilterSkippedCallCount(); i++ {
-					arg := metrics.IncFilterSkippedArgsForCall(i)
-					Expect(arg).NotTo(Equal("auto_update_disabled"))
-				}
+				// AC7 (spec 002): an unparsable .maintainer.yaml is dropped before the
+				// filter chain ever runs -- IncFilterSkipped must not be called at
+				// all, not merely called with some other reason.
+				Expect(metrics.IncFilterSkippedCallCount()).To(Equal(0))
 			})
 		})
 
@@ -361,9 +347,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -421,9 +405,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -445,9 +427,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("force=true still respects consent gate", func() {
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: false},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.RefusedConsent, nil)
 
 				err := watcher.Poll(context.Background(), true)
 				Expect(err).NotTo(HaveOccurred())
@@ -502,9 +482,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -537,9 +515,7 @@ var _ = Describe("watcher", func() {
 					{Owner: "bborbe", Name: "repo2", DefaultBranch: "main"},
 					{Owner: "bborbe", Name: "repo3", DefaultBranch: "main"},
 				}, nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -588,9 +564,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -617,9 +591,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
 				ghClient.GetGoModReturns(nil, nil) // no go.mod -> no_gomod
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)
@@ -651,9 +623,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				ghClient.GetHeadSHAReturns(headSHA, nil)
 				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
-				ghClient.GetMaintainerConfigReturns(maintainerconfig.MaintainerConfig{
-					GoUpdate: maintainerconfig.GoUpdateConfig{AutoUpdate: true},
-				}, nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
 				goDevClient.LatestStableReturns(pkg.Version{
 					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
 				}, nil)

@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/bborbe/github-update-go-watcher/pkg"
+	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
 var _ = Describe("GitHubClient", func() {
@@ -397,11 +398,11 @@ var _ = Describe("GitHubClient", func() {
 				server.Close()
 			})
 
-			It("returns zero config and nil error", func() {
+			It("returns undecided consent and nil error", func() {
 				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
-				cfg, err := client.GetMaintainerConfig(ctx, repo)
+				consent, err := client.GetMaintainerConfig(ctx, repo)
 				Expect(err).To(Succeed())
-				Expect(cfg.GoUpdate.AutoUpdate).To(BeFalse())
+				Expect(consent).To(Equal(filter.UndecidedConsent))
 			})
 		})
 
@@ -430,11 +431,11 @@ var _ = Describe("GitHubClient", func() {
 				server.Close()
 			})
 
-			It("returns config with autoUpdate true", func() {
+			It("returns granted consent and nil error", func() {
 				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
-				cfg, err := client.GetMaintainerConfig(ctx, repo)
+				consent, err := client.GetMaintainerConfig(ctx, repo)
 				Expect(err).To(Succeed())
-				Expect(cfg.GoUpdate.AutoUpdate).To(BeTrue())
+				Expect(consent).To(Equal(filter.GrantedConsent))
 			})
 		})
 
@@ -461,11 +462,11 @@ var _ = Describe("GitHubClient", func() {
 				server.Close()
 			})
 
-			It("returns autoUpdate false and nil error", func() {
+			It("returns undecided consent and nil error", func() {
 				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
-				cfg, err := client.GetMaintainerConfig(ctx, repo)
+				consent, err := client.GetMaintainerConfig(ctx, repo)
 				Expect(err).To(Succeed())
-				Expect(cfg.GoUpdate.AutoUpdate).To(BeFalse())
+				Expect(consent).To(Equal(filter.UndecidedConsent))
 			})
 		})
 
@@ -492,11 +493,11 @@ var _ = Describe("GitHubClient", func() {
 				server.Close()
 			})
 
-			It("returns zero config and non-nil error", func() {
+			It("returns zero consent and non-nil error", func() {
 				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
-				cfg, err := client.GetMaintainerConfig(ctx, repo)
+				consent, err := client.GetMaintainerConfig(ctx, repo)
 				Expect(err).To(HaveOccurred())
-				Expect(cfg.GoUpdate.AutoUpdate).To(BeFalse())
+				Expect(consent).To(Equal(filter.Consent("")))
 				// Malformed must NOT read as opted-in
 			})
 		})
@@ -525,6 +526,39 @@ var _ = Describe("GitHubClient", func() {
 				_, err := client.GetMaintainerConfig(ctx, repo)
 				Expect(err).To(HaveOccurred())
 				Expect(errors.Is(err, pkg.ErrRateLimited)).To(BeTrue())
+			})
+		})
+
+		Context("explicit autoUpdate false", func() {
+			BeforeEach(func() {
+				encoded := base64.StdEncoding.EncodeToString(
+					[]byte("goUpdate:\n  autoUpdate: false"),
+				)
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					resp := map[string]interface{}{
+						"type":     "file",
+						"encoding": "base64",
+						"size":     len(encoded),
+						"content":  encoded,
+					}
+					json.NewEncoder(w).Encode(resp)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns refused consent and nil error", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				consent, err := client.GetMaintainerConfig(ctx, repo)
+				Expect(err).To(Succeed())
+				Expect(consent).To(Equal(filter.RefusedConsent))
 			})
 		})
 	})

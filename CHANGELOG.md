@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: Add tri-state `filter.Consent` (`granted`/`refused`/`undecided`) and `filter.ParseConsent` — `GetMaintainerConfig` now returns `filter.Consent` instead of `maintainerconfig.MaintainerConfig`, walking `.maintainer.yaml` as a raw yaml.Node so an absent or non-boolean `goUpdate.autoUpdate` no longer collapses with an explicit `false`
+
 ## v0.4.1
 
 - fix: detect merged update PRs via `merged_at`, not `merged` — the GitHub list API returns `merged: null` even for merged PRs (only the detail view populates it), so `GetMerged()` always read false and the merge-detection pass silently skipped every merged PR; checking `merged_at` (populated on list responses) makes complete-task actually fire

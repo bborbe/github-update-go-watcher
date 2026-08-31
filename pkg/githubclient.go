@@ -10,9 +10,10 @@ import (
 	"net/http"
 
 	"github.com/bborbe/errors"
-	"github.com/bborbe/maintainer/maintainerconfig"
 	"github.com/golang/glog"
 	gogithub "github.com/google/go-github/v84/github"
+
+	"github.com/bborbe/github-update-go-watcher/pkg/filter"
 )
 
 // ErrRateLimited is returned when the GitHub API responds with a primary or
@@ -54,20 +55,25 @@ type GitHubClient interface {
 	// 5xx, oversize, base64 decode) returns a wrapped error and drops the repo.
 	GetGoMod(ctx context.Context, repo Repo) ([]byte, error)
 
-	// GetMaintainerConfig returns the parsed `.maintainer.yaml` at HEAD of
-	// repo's default branch. This file is the repo owner's consent record.
+	// GetMaintainerConfig returns the parsed consent verdict from
+	// `.maintainer.yaml` at HEAD of repo's default branch (spec 002 Desired
+	// Behavior 1). This file is the repo owner's consent record.
 	//
-	//   - (parsed config, nil) on a valid YAML document, including empty input
-	//     and documents with the `goUpdate:` key absent (both zero-value).
-	//   - (zero-value, nil) on HTTP 404 (file absent) — reads as NOT opted in.
-	//   - (zero-value, ErrRateLimited) on primary or abuse rate limiting.
-	//   - (zero-value, wrapped error) on every other failure including 5xx,
-	//     oversize files, base64 decode failures, and YAML parse failures.
+	//   - (filter.GrantedConsent, nil) — autoUpdate is explicitly boolean true.
+	//   - (filter.RefusedConsent, nil) — autoUpdate is explicitly boolean false.
+	//   - (filter.UndecidedConsent, nil) — the file is absent (HTTP 404), the
+	//     goUpdate section is absent, the autoUpdate key is absent, or the key
+	//     holds any non-boolean value.
+	//   - (filter.Consent(""), ErrRateLimited) on primary or abuse rate
+	//     limiting.
+	//   - (filter.Consent(""), wrapped error) on every other failure including
+	//     5xx, oversize files, base64 decode failures, and YAML parse
+	//     failures.
 	//
-	// Malformed YAML MUST NOT be silently treated as autoUpdate:false — it is
+	// Malformed YAML MUST NOT be silently treated as UndecidedConsent — it is
 	// an error so the repo is dropped from the cycle rather than recorded as a
 	// consent verdict.
-	GetMaintainerConfig(ctx context.Context, repo Repo) (maintainerconfig.MaintainerConfig, error)
+	GetMaintainerConfig(ctx context.Context, repo Repo) (filter.Consent, error)
 
 	// GetMergedUpdatePR reports whether repo has a merged pull request whose
 	// head branch is the update branch for headSHA (fix/update-go-<sha[:7]> —
@@ -262,50 +268,50 @@ func (c *githubClient) GetGoMod(ctx context.Context, repo Repo) ([]byte, error) 
 func (c *githubClient) GetMaintainerConfig(
 	ctx context.Context,
 	repo Repo,
-) (maintainerconfig.MaintainerConfig, error) {
+) (filter.Consent, error) {
 	opts := &gogithub.RepositoryContentGetOptions{Ref: repo.DefaultBranch}
 	fileContent, _, _, err := c.client.Repositories.GetContents(
 		ctx, repo.Owner, repo.Name, ".maintainer.yaml", opts,
 	)
 	if err != nil {
 		if isNotFound(err) {
-			return maintainerconfig.MaintainerConfig{}, nil
+			return filter.UndecidedConsent, nil
 		}
 		if isRateLimitError(err) {
-			return maintainerconfig.MaintainerConfig{}, ErrRateLimited
+			return filter.Consent(""), ErrRateLimited
 		}
-		return maintainerconfig.MaintainerConfig{}, errors.Wrapf(
+		return filter.Consent(""), errors.Wrapf(
 			ctx, err, "get .maintainer.yaml %s ref=%s", repo.String(), repo.DefaultBranch,
 		)
 	}
 	if fileContent == nil {
-		return maintainerconfig.MaintainerConfig{}, nil
+		return filter.UndecidedConsent, nil
 	}
 	if fileContent.GetSize() > maxContentBytes {
-		return maintainerconfig.MaintainerConfig{}, errors.Errorf(
+		return filter.Consent(""), errors.Errorf(
 			ctx, ".maintainer.yaml %s too large: %d bytes (max %d)",
 			repo.String(), fileContent.GetSize(), maxContentBytes,
 		)
 	}
 	decoded, err := fileContent.GetContent()
 	if err != nil {
-		return maintainerconfig.MaintainerConfig{}, errors.Wrapf(
+		return filter.Consent(""), errors.Wrapf(
 			ctx, err, "decode .maintainer.yaml %s", repo.String(),
 		)
 	}
 	if len(decoded) > maxContentBytes {
-		return maintainerconfig.MaintainerConfig{}, errors.Errorf(
+		return filter.Consent(""), errors.Errorf(
 			ctx, ".maintainer.yaml %s decoded too large: %d bytes (max %d)",
 			repo.String(), len(decoded), maxContentBytes,
 		)
 	}
-	cfg, err := maintainerconfig.Parse(ctx, []byte(decoded))
+	consent, err := filter.ParseConsent(ctx, []byte(decoded))
 	if err != nil {
-		return maintainerconfig.MaintainerConfig{}, errors.Wrapf(
+		return filter.Consent(""), errors.Wrapf(
 			ctx, err, "parse .maintainer.yaml %s", repo.String(),
 		)
 	}
-	return cfg, nil
+	return consent, nil
 }
 
 // GetMergedUpdatePR implements GitHubClient. It lists pull requests whose head

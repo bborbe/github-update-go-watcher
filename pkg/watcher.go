@@ -210,7 +210,7 @@ func (w *watcher) gatherCandidate(
 		return dropRepo(repo, "go_mod", err)
 	}
 
-	cfg, err := w.ghClient.GetMaintainerConfig(ctx, repo)
+	consent, err := w.ghClient.GetMaintainerConfig(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
 			return Candidate{}, "rate_limited", false
@@ -219,10 +219,13 @@ func (w *watcher) gatherCandidate(
 	}
 
 	candidate := Candidate{
-		Repo:       repo,
-		HeadSHA:    headSHA,
-		LatestGo:   latestGo,
-		AutoUpdate: cfg.GoUpdate.AutoUpdate,
+		Repo:     repo,
+		HeadSHA:  headSHA,
+		LatestGo: latestGo,
+		// Candidate.AutoUpdate stays a bool in this prompt (renamed to a
+		// filter.Consent field in a later prompt). This collapse is a
+		// deliberately temporary bridge so nothing observable changes yet.
+		AutoUpdate: consent == filter.GrantedConsent,
 	}
 	if goModContent != nil {
 		candidate.GoModPresent = true

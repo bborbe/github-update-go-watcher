@@ -1,8 +1,12 @@
 ---
-status: draft
+status: prompted
 tags:
     - dark-factory
     - spec
+approved: "2026-08-31T10:02:36Z"
+generating: "2026-08-31T11:01:47Z"
+prompted: "2026-08-31T11:01:47Z"
+branch: dark-factory/consent-tristate-undecided
 ---
 
 ## Summary
@@ -93,7 +97,7 @@ Consent becomes three-valued rather than boolean:
 - [ ] **AC5 (DB7, DB8)** — decision-task identity is repo-keyed: two cycles against the same undecided repo with **different** HEAD SHAs produce the **same** task identifier. Evidence: unit test varying HEAD across cycles, asserting the derived identifier is byte-identical across both and contains no SHA substring; **and** that two different undecided repos yield different identifiers (`id(ownerA/repoA) != id(ownerB/repoB)`). Without the second clause a single hardcoded constant satisfies the AC, collapsing every undecided repo onto one identity so the controller dedups them into a single task naming one repo — the exact invisibility this spec abolishes.
 - [ ] **AC6 (DB9)** — an undecided repo already current on Go emits nothing. Evidence: unit test asserts verdict is `go_current` and publisher call count is 0.
 - [ ] **AC7 (DB2)** — an unparsable `.maintainer.yaml` is dropped before evaluation with step `maintainer_config`, producing neither an `auto_update_undecided` verdict nor a task. Evidence: assert the drop step is `maintainer_config` (not `gomod_unparsable`, which is the unreadable-`go.mod` path), `IncFilterSkipped` call count is 0 for that repo, and no command is published.
-- [ ] **AC8 (Security)** — no consent input yields `granted` except an explicit boolean `true`. Evidence: table test enumerating absent file, absent section, absent key, string `"true"`, integer `1`, `yes`, null, and malformed YAML; each asserts a non-empty skip reason.
+- [ ] **AC8 (Security)** — no consent input yields `granted` except an explicit boolean `true`. Evidence: table test enumerating absent file, absent section, absent key, string `"true"`, integer `1`, `yes`, null, and malformed YAML; each asserts the outcome is never `granted` — the seven non-malformed rows via a nil-error non-granted verdict, the malformed row via a non-nil parse error consistent with AC7's drop-before-evaluation contract.
 - [ ] **AC9 (DB6, negative evidence)** — across a full cycle over undecided repos, **zero** published commands carry the update task type and **zero** carry assignee `github-update-go-agent`. Evidence: publisher mock inspected for both fields; counts are 0. (Asserting "no writes to the observed repo" would be vacuous — the GitHub client exposes no write methods.)
 - [ ] **AC10 (DB10)** — the decision task body names the repo's current Go version and the stable version, and contains both literal strings `autoUpdate: true` and `autoUpdate: false` so the reader knows the two available answers. Evidence: `grep`-shaped assertions on the built body, following the existing `buildTaskBody` test precedent.
 - [ ] **AC11 (Constraint)** — `auto_update_undecided` is pre-initialised in the skip-reason metric and documented in `README.md`. Evidence: `grep -q 'auto_update_undecided' README.md`, and a metrics test asserting the series exists at zero before any cycle.
