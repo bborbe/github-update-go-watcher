@@ -78,6 +78,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `auto_update_disabled` | Repo has `goUpdate.autoUpdate: false` explicitly set in `.maintainer.yaml` |
 | `auto_update_undecided` | `.maintainer.yaml` is absent, has no `goUpdate:` section, has no `autoUpdate` key, or the key holds a non-boolean value — the owner has never answered. A decision task is filed once per repo (see [Decision task contract](#decision-task-contract)) |
 | `sha_unchanged` | Repo HEAD SHA has not changed since last successful cycle (not evaluated on forced cycles) |
+| `open_update_pr` | Repo has an open `fix/update-go-*` pull request — an update is already in flight, so no new task is emitted (always-on gate, spec 003) |
 
 ## Emitted task contract
 

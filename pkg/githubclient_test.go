@@ -696,4 +696,146 @@ var _ = Describe("GitHubClient", func() {
 			})
 		})
 	})
+
+	Describe("HasOpenUpdatePR", func() {
+		Context("open update PR exists", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/repos/myowner/myrepo/pulls" {
+						http.NotFound(w, r)
+						return
+					}
+					if r.URL.Query().Get("state") != "open" {
+						http.Error(w, "expected state=open", http.StatusBadRequest)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[
+						{"number": 1, "state": "open", "merged": null, "head": {"ref": "fix/update-go-d630ef3"}}
+					]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns true", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				open, err := client.HasOpenUpdatePR(ctx, repo)
+				Expect(err).To(Succeed())
+				Expect(open).To(BeTrue())
+			})
+		})
+
+		Context("only non-update open PRs", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[
+						{"number": 1, "state": "open", "merged": null, "head": {"ref": "feature/foo"}}
+					]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns false", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				open, err := client.HasOpenUpdatePR(ctx, repo)
+				Expect(err).To(Succeed())
+				Expect(open).To(BeFalse())
+			})
+		})
+
+		Context("mixed open PRs where one carries the update prefix", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[
+						{"number": 1, "state": "open", "merged": null, "head": {"ref": "feature/foo"}},
+						{"number": 2, "state": "open", "merged": null, "head": {"ref": "fix/update-go-d630ef3"}}
+					]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns true", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				open, err := client.HasOpenUpdatePR(ctx, repo)
+				Expect(err).To(Succeed())
+				Expect(open).To(BeTrue())
+			})
+		})
+
+		Context("no open PRs", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `[]`)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns false", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				open, err := client.HasOpenUpdatePR(ctx, repo)
+				Expect(err).To(Succeed())
+				Expect(open).To(BeFalse())
+			})
+		})
+
+		Context("rate limited", func() {
+			BeforeEach(func() {
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", "0")
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprint(
+						w,
+						`{"message": "API rate limit exceeded", "documentation_url": "https://docs.github.com"}`,
+					)
+				})
+				server = httptest.NewServer(handler)
+				client = pkg.NewGitHubClient(server.Client())
+				err := pkg.SetBaseURL(client, server.URL+"/")
+				Expect(err).To(Succeed())
+			})
+
+			AfterEach(func() {
+				server.Close()
+			})
+
+			It("returns ErrRateLimited", func() {
+				repo := pkg.Repo{Owner: "myowner", Name: "myrepo", DefaultBranch: "main"}
+				_, err := client.HasOpenUpdatePR(ctx, repo)
+				Expect(errors.Is(err, pkg.ErrRateLimited)).To(BeTrue())
+			})
+		})
+	})
 })

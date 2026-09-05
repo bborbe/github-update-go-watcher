@@ -8,6 +8,7 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
+	"strings"
 
 	"github.com/bborbe/errors"
 	"github.com/golang/glog"
@@ -29,6 +30,12 @@ const maxContentBytes = 1024 * 1024
 // maxListPages bounds repo-list pagination so a self-referential or
 // misbehaving `next` link cannot loop the cycle forever.
 const maxListPages = 100
+
+// updateBranchPrefix is the single source of the head-branch prefix the
+// github-update-go-agent opens for update tasks. Both the open-PR in-flight
+// gate (HasOpenUpdatePR) and the merged-PR completion pass (GetMergedUpdatePR)
+// build branches from it. Kept in sync with the agent's branchPrefix.
+const updateBranchPrefix = "fix/update-go-"
 
 //counterfeiter:generate -o ../mocks/github_client.go --fake-name GitHubClient . GitHubClient
 
@@ -87,6 +94,19 @@ type GitHubClient interface {
 	//   - (false, ErrRateLimited) on primary or abuse rate limiting.
 	//   - (false, wrapped error) on every other failure.
 	GetMergedUpdatePR(ctx context.Context, repo Repo, headSHA string) (bool, error)
+
+	// HasOpenUpdatePR reports whether repo has an open pull request whose head
+	// branch carries the update prefix (fix/update-go-*). An open update PR is the
+	// in-flight signal for the update task: while one is open the watcher must not
+	// emit another create-task command for the repo, no matter how far head_sha has
+	// moved (spec 003). Open PRs are listed state=open and the prefix match is
+	// client-side.
+	//
+	//   - (true, nil) — at least one open PR with a fix/update-go-* head branch.
+	//   - (false, nil) — no such open PR.
+	//   - (false, ErrRateLimited) on primary or abuse rate limiting.
+	//   - (false, wrapped error) on every other failure.
+	HasOpenUpdatePR(ctx context.Context, repo Repo) (bool, error)
 }
 
 // NewGitHubClient returns the production GitHubClient backed by the given
@@ -361,14 +381,53 @@ func (c *githubClient) GetMergedUpdatePR(
 	return false, nil
 }
 
+// HasOpenUpdatePR implements GitHubClient. It lists pull requests whose head
+// branch carries the update prefix (fix/update-go-*) and reports whether any
+// is open. The list is state=open — the in-flight signal for the update task.
+func (c *githubClient) HasOpenUpdatePR(ctx context.Context, repo Repo) (bool, error) {
+	opts := &gogithub.PullRequestListOptions{
+		State: "open",
+		ListOptions: gogithub.ListOptions{
+			PerPage: 100,
+		},
+	}
+	prs, _, err := c.client.PullRequests.List(ctx, repo.Owner, repo.Name, opts)
+	if err != nil {
+		if isRateLimitError(err) {
+			return false, ErrRateLimited
+		}
+		glog.Warningf(
+			"list pull requests %s state=open failed: %v",
+			repo.String(),
+			err,
+		)
+		return false, errors.Wrapf(
+			ctx, err, "list open pull requests %s", repo.String(),
+		)
+	}
+	for _, pr := range prs {
+		select {
+		case <-ctx.Done():
+			return false, errors.Wrap(
+				ctx, ctx.Err(), "context cancelled during HasOpenUpdatePR",
+			)
+		default:
+		}
+		if strings.HasPrefix(pr.GetHead().GetRef(), updateBranchPrefix) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // updateBranchName returns the deterministic head branch the
 // github-update-go-agent opens for a task filed at headSHA:
-// "fix/update-go-<sha[:7]>". Kept in sync with the agent's branchPrefix +
+// updateBranchPrefix + "<sha[:7]>". Kept in sync with the agent's branchPrefix +
 // ref[:7] (ref = the task's pinned filing SHA = the watcher's emit-time HEAD).
 func updateBranchName(headSHA string) string {
 	short := headSHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	return "fix/update-go-" + short
+	return updateBranchPrefix + short
 }
