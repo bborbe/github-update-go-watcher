@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: update Go to 1.27.1 and github.com/bborbe/agent to v0.87.1, github.com/bborbe/kafka to v1.25.13, github.com/bborbe/maintainer to v0.50.6, github.com/bborbe/service to v1.10.12
+
 ## v0.6.0
 
 - fix: stop re-emitting an update task for a repo with an open `fix/update-go-*` PR — the watcher gains an always-on open-PR in-flight gate (`HasOpenUpdatePR`) that skips the repo with reason `open_update_pr` on every cycle, including forced ones, so a new commit no longer re-files on undrained work; the head-branch prefix now lives in a single constant (`updateBranchPrefix`) shared by the open-PR gate and the merged-PR completion pass
