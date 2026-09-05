@@ -167,6 +167,13 @@ func (w *watcher) processRepos(
 			continue
 		}
 
+		switch w.openUpdatePRGate(ctx, repo) {
+		case "rate_limited":
+			return "rate_limited"
+		case "skip":
+			continue
+		}
+
 		if reason := cycleFilter.Skip(candidate.FilterCandidate()); reason != "" {
 			w.metrics.IncFilterSkipped(reason)
 			glog.V(2).Infof(
@@ -199,6 +206,41 @@ func (w *watcher) processRepos(
 				LastSeenHeadSHA: candidate.HeadSHA,
 			}
 		}
+	}
+	return ""
+}
+
+// openUpdatePRGate applies the always-on open-PR in-flight gate (spec 003) to
+// repo: an open update PR (fix/update-go-* head branch) means an update task is
+// already underway, so the repo must not be emitted no matter how far head_sha
+// has moved. Returns the repo's cycle action:
+//
+//   - "" — no open update PR, continue normal processing.
+//   - "skip" — repo has an open update PR, or the in-flight check failed
+//     non-fatally: drop the repo from this cycle (nothing is emitted on
+//     uncertainty; the next poll re-checks).
+//   - "rate_limited" — the in-flight check was rate limited: abort the cycle.
+func (w *watcher) openUpdatePRGate(ctx context.Context, repo Repo) string {
+	openUpdate, err := w.ghClient.HasOpenUpdatePR(ctx, repo)
+	if err != nil {
+		if stderrors.Is(err, ErrRateLimited) {
+			glog.Warningf(
+				"poll cycle aborted: rate limited during HasOpenUpdatePR owner=%s",
+				w.owner,
+			)
+			return "rate_limited"
+		}
+		dropRepo(repo, "open_update_pr", err)
+		return "skip"
+	}
+	if openUpdate {
+		w.metrics.IncFilterSkipped("open_update_pr")
+		glog.V(2).Infof(
+			"repo skipped repo=%s reason=%s",
+			repo.Key(),
+			"open_update_pr",
+		)
+		return "skip"
 	}
 	return ""
 }

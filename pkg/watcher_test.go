@@ -757,5 +757,77 @@ var _ = Describe("watcher", func() {
 				)).To(Equal("rate_limited"))
 			})
 		})
+
+		Context("open update PR gate (spec 003)", func() {
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns("d630ef3526cfc57fbdccd9ba53c5c3a02945e407", nil)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				publisher.PublishCreateReturns(true)
+				metrics.IncFilterSkippedStub = func(string) {}
+				buildWatcher()
+			})
+
+			It("skips a repo with an open update PR and publishes nothing", func() {
+				ghClient.HasOpenUpdatePRReturns(true, nil)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+				Expect(metrics.IncFilterSkippedArgsForCall(0)).To(Equal("open_update_pr"))
+			})
+
+			It("emits a repo with no open update PR", func() {
+				ghClient.HasOpenUpdatePRReturns(false, nil)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+			})
+
+			It("aborts the cycle when HasOpenUpdatePR is rate limited", func() {
+				ghClient.HasOpenUpdatePRReturns(false, pkg.ErrRateLimited)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+				Expect(metrics.IncPollCycleArgsForCall(
+					metrics.IncPollCycleCallCount() - 1,
+				)).To(Equal("rate_limited"))
+			})
+
+			It("drops the repo on a non-rate-limit HasOpenUpdatePR error and continues", func() {
+				ghClient.HasOpenUpdatePRReturns(false, errors.New("open pr check failed"))
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+				// Dropped before the filter chain runs — not a skip verdict.
+				Expect(metrics.IncFilterSkippedCallCount()).To(Equal(0))
+				Expect(metrics.IncPollCycleArgsForCall(
+					metrics.IncPollCycleCallCount() - 1,
+				)).To(Equal("success"))
+			})
+
+			It("applies on forced cycles", func() {
+				ghClient.HasOpenUpdatePRReturns(true, nil)
+
+				err := watcher.Poll(context.Background(), true)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Without the gate, force=true would publish.
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+			})
+		})
 	})
 })

@@ -67,6 +67,20 @@ type GitHubClient struct {
 		result1 bool
 		result2 error
 	}
+	HasOpenUpdatePRStub        func(context.Context, pkg.Repo) (bool, error)
+	hasOpenUpdatePRMutex       sync.RWMutex
+	hasOpenUpdatePRArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+	}
+	hasOpenUpdatePRReturns struct {
+		result1 bool
+		result2 error
+	}
+	hasOpenUpdatePRReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
 	ListReposStub        func(context.Context, string) ([]pkg.Repo, error)
 	listReposMutex       sync.RWMutex
 	listReposArgsForCall []struct {
@@ -341,6 +355,71 @@ func (fake *GitHubClient) GetMergedUpdatePRReturnsOnCall(i int, result1 bool, re
 		})
 	}
 	fake.getMergedUpdatePRReturnsOnCall[i] = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *GitHubClient) HasOpenUpdatePR(arg1 context.Context, arg2 pkg.Repo) (bool, error) {
+	fake.hasOpenUpdatePRMutex.Lock()
+	ret, specificReturn := fake.hasOpenUpdatePRReturnsOnCall[len(fake.hasOpenUpdatePRArgsForCall)]
+	fake.hasOpenUpdatePRArgsForCall = append(fake.hasOpenUpdatePRArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+	}{arg1, arg2})
+	stub := fake.HasOpenUpdatePRStub
+	fakeReturns := fake.hasOpenUpdatePRReturns
+	fake.recordInvocation("HasOpenUpdatePR", []interface{}{arg1, arg2})
+	fake.hasOpenUpdatePRMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *GitHubClient) HasOpenUpdatePRCallCount() int {
+	fake.hasOpenUpdatePRMutex.RLock()
+	defer fake.hasOpenUpdatePRMutex.RUnlock()
+	return len(fake.hasOpenUpdatePRArgsForCall)
+}
+
+func (fake *GitHubClient) HasOpenUpdatePRCalls(stub func(context.Context, pkg.Repo) (bool, error)) {
+	fake.hasOpenUpdatePRMutex.Lock()
+	defer fake.hasOpenUpdatePRMutex.Unlock()
+	fake.HasOpenUpdatePRStub = stub
+}
+
+func (fake *GitHubClient) HasOpenUpdatePRArgsForCall(i int) (context.Context, pkg.Repo) {
+	fake.hasOpenUpdatePRMutex.RLock()
+	defer fake.hasOpenUpdatePRMutex.RUnlock()
+	argsForCall := fake.hasOpenUpdatePRArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *GitHubClient) HasOpenUpdatePRReturns(result1 bool, result2 error) {
+	fake.hasOpenUpdatePRMutex.Lock()
+	defer fake.hasOpenUpdatePRMutex.Unlock()
+	fake.HasOpenUpdatePRStub = nil
+	fake.hasOpenUpdatePRReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *GitHubClient) HasOpenUpdatePRReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.hasOpenUpdatePRMutex.Lock()
+	defer fake.hasOpenUpdatePRMutex.Unlock()
+	fake.HasOpenUpdatePRStub = nil
+	if fake.hasOpenUpdatePRReturnsOnCall == nil {
+		fake.hasOpenUpdatePRReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.hasOpenUpdatePRReturnsOnCall[i] = struct {
 		result1 bool
 		result2 error
 	}{result1, result2}
