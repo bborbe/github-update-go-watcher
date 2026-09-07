@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.6.4
 
 - chore: update github.com/bborbe/agent to v0.87.4, github.com/bborbe/cqrs to v0.6.10, github.com/bborbe/kafka to v1.25.16, github.com/bborbe/maintainer to v0.50.7, github.com/bborbe/metrics to v0.6.3
 
