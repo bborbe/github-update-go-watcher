@@ -45,11 +45,12 @@ func (c Candidate) GoBehind() bool {
 // FilterCandidate projects this observation onto the filter package's input.
 func (c Candidate) FilterCandidate() filter.Candidate {
 	return filter.Candidate{
-		RepoKey:       c.Repo.Key(),
-		HeadSHA:       c.HeadSHA,
-		GoModPresent:  c.GoModPresent,
-		GoModParsable: c.GoModParsable,
-		GoBehind:      c.GoBehind(),
-		Consent:       c.Consent,
+		RepoKey:         c.Repo.Key(),
+		HeadSHA:         c.HeadSHA,
+		LatestGoVersion: c.LatestGo.Number(),
+		GoModPresent:    c.GoModPresent,
+		GoModParsable:   c.GoModParsable,
+		GoBehind:        c.GoBehind(),
+		Consent:         c.Consent,
 	}
 }

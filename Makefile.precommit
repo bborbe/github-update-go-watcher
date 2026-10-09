@@ -35,7 +35,17 @@ endif
 test:
 	go test -mod=mod -p=$${GO_TEST_PARALLEL:-1} -cover $(TESTFLAGS_RACE) $(shell go list -mod=mod ./... | grep -v /vendor/)
 
-check: lint vet errcheck vulncheck osv-scanner gosec trivy
+# errcheck and gosec are deliberately NOT in this chain. Both standalone
+# binaries fail to type-check under the go1.27.2 toolchain: the build cache now
+# carries export data version 5 and their bundled go/types supports a maximum of
+# version 4 (`cannot decode "context", export data version 5 is greater than
+# maximum supported version 4`). Reproduced for errcheck v1.20.0 and gosec
+# v2.29.0 — each the newest release — with and without GODEBUG=gotypesalias=1,
+# and in a sibling repo on the same toolchain, so it is the tools, not this repo.
+# Both targets are kept below so they can be run by hand once compatible
+# releases exist. No coverage is lost: both linters are enabled in
+# .golangci.yml and run as part of `lint`, which passes under v2.14.0.
+check: lint vet vulncheck osv-scanner trivy
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --allow-parallel-runners --config .golangci.yml ./...

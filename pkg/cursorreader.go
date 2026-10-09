@@ -25,3 +25,14 @@ func (r *cursorReader) LastSeenSHA(repoKey string) string {
 	}
 	return entry.LastSeenHeadSHA
 }
+
+func (r *cursorReader) LastSeenGoVersion(repoKey string) string {
+	if r.c == nil || r.c.Repos == nil {
+		return ""
+	}
+	entry := r.c.Repos[repoKey]
+	if entry == nil {
+		return ""
+	}
+	return entry.LastSeenGoVersion
+}

@@ -8,6 +8,17 @@ import (
 )
 
 type CursorReader struct {
+	LastSeenGoVersionStub        func(string) string
+	lastSeenGoVersionMutex       sync.RWMutex
+	lastSeenGoVersionArgsForCall []struct {
+		arg1 string
+	}
+	lastSeenGoVersionReturns struct {
+		result1 string
+	}
+	lastSeenGoVersionReturnsOnCall map[int]struct {
+		result1 string
+	}
 	LastSeenSHAStub        func(string) string
 	lastSeenSHAMutex       sync.RWMutex
 	lastSeenSHAArgsForCall []struct {
@@ -21,6 +32,67 @@ type CursorReader struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *CursorReader) LastSeenGoVersion(arg1 string) string {
+	fake.lastSeenGoVersionMutex.Lock()
+	ret, specificReturn := fake.lastSeenGoVersionReturnsOnCall[len(fake.lastSeenGoVersionArgsForCall)]
+	fake.lastSeenGoVersionArgsForCall = append(fake.lastSeenGoVersionArgsForCall, struct {
+		arg1 string
+	}{arg1})
+	stub := fake.LastSeenGoVersionStub
+	fakeReturns := fake.lastSeenGoVersionReturns
+	fake.recordInvocation("LastSeenGoVersion", []interface{}{arg1})
+	fake.lastSeenGoVersionMutex.Unlock()
+	if stub != nil {
+		return stub(arg1)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *CursorReader) LastSeenGoVersionCallCount() int {
+	fake.lastSeenGoVersionMutex.RLock()
+	defer fake.lastSeenGoVersionMutex.RUnlock()
+	return len(fake.lastSeenGoVersionArgsForCall)
+}
+
+func (fake *CursorReader) LastSeenGoVersionCalls(stub func(string) string) {
+	fake.lastSeenGoVersionMutex.Lock()
+	defer fake.lastSeenGoVersionMutex.Unlock()
+	fake.LastSeenGoVersionStub = stub
+}
+
+func (fake *CursorReader) LastSeenGoVersionArgsForCall(i int) string {
+	fake.lastSeenGoVersionMutex.RLock()
+	defer fake.lastSeenGoVersionMutex.RUnlock()
+	argsForCall := fake.lastSeenGoVersionArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *CursorReader) LastSeenGoVersionReturns(result1 string) {
+	fake.lastSeenGoVersionMutex.Lock()
+	defer fake.lastSeenGoVersionMutex.Unlock()
+	fake.LastSeenGoVersionStub = nil
+	fake.lastSeenGoVersionReturns = struct {
+		result1 string
+	}{result1}
+}
+
+func (fake *CursorReader) LastSeenGoVersionReturnsOnCall(i int, result1 string) {
+	fake.lastSeenGoVersionMutex.Lock()
+	defer fake.lastSeenGoVersionMutex.Unlock()
+	fake.LastSeenGoVersionStub = nil
+	if fake.lastSeenGoVersionReturnsOnCall == nil {
+		fake.lastSeenGoVersionReturnsOnCall = make(map[int]struct {
+			result1 string
+		})
+	}
+	fake.lastSeenGoVersionReturnsOnCall[i] = struct {
+		result1 string
+	}{result1}
 }
 
 func (fake *CursorReader) LastSeenSHA(arg1 string) string {

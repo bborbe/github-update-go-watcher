@@ -8,6 +8,12 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: update Go to 1.27.2 (`go.mod` + `Dockerfile`) and `golang.org/x/net` to v0.60.0, clearing the new govulncheck advisories (stdlib GO-2026-6599/6600/6604/6605, x/net GO-2026-6603/6617). Pin `GOLANGCI_LINT_VERSION` to v2.14.0 — v2.13.1 cannot decode go1.27.2 export data and fails the lint step.
+- chore: drop the standalone `errcheck` and `gosec` targets from `make check`. Both newest releases (errcheck v1.20.0, gosec v2.29.0) fail to type-check under the go1.27.2 toolchain — their bundled `go/types` cannot decode export data version 5. Both linters stay enabled in `.golangci.yml`, so `lint` still covers them.
+- fix: make the watcher's skip two-key so a stalled repo re-enters the pipeline on a new Go release. The cursor now records the cycle's target Go version (`last_seen_go_version`) beside the HEAD, and `sha_unchanged` requires both to be unchanged; the update-task identifier folds the target Go version into its seed (`update-go-<owner>-<repo>-<goVersion>-<headSHA>`), so a new stable Go release produces a fresh work item instead of one downstream dedup already absorbed. A pre-fix cursor entry (no recorded version) is re-evaluated once — the recovery path for the currently stalled repos.
+
 ## v0.6.4
 
 - chore: update github.com/bborbe/agent to v0.87.4, github.com/bborbe/cqrs to v0.6.10, github.com/bborbe/kafka to v1.25.16, github.com/bborbe/maintainer to v0.50.7, github.com/bborbe/metrics to v0.6.3

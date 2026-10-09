@@ -43,6 +43,32 @@ var _ = Describe("LoadCursor", func() {
 		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenHeadSHA).To(Equal("abc"))
 	})
 
+	It("round-trips LastSeenGoVersion", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		orig := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/a": {
+					LastSeenHeadSHA:   "abc",
+					LastSeenGoVersion: "1.27.2",
+				},
+			},
+		}
+		Expect(pkg.SaveCursor(ctx, path, orig)).To(Succeed())
+		loaded, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenGoVersion).To(Equal("1.27.2"))
+	})
+
+	It("loads a pre-fix cursor entry with no last_seen_go_version key", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		legacy := `{"repos":{"github.com/bborbe/a":{"last_seen_head_sha":"abc"}}}`
+		Expect(os.WriteFile(path, []byte(legacy), 0600)).To(Succeed())
+		loaded, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenHeadSHA).To(Equal("abc"))
+		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenGoVersion).To(Equal(""))
+	})
+
 	It("null repos becomes non-nil empty map", func() {
 		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
 		Expect(os.WriteFile(path, []byte(`{"repos":null}`), 0600)).To(Succeed())

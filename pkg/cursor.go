@@ -29,6 +29,15 @@ type Cursor struct {
 // RepoState is the cursor entry per repo.
 type RepoState struct {
 	LastSeenHeadSHA string `json:"last_seen_head_sha"`
+	// LastSeenGoVersion is the cycle's resolved stable Go version at the moment
+	// LastSeenHeadSHA was recorded, in the three-part form the emitted task
+	// carries as latest_go (e.g. "1.27.2"). Together with LastSeenHeadSHA it is
+	// the two-key dedup input: a new Go release moves no repo's HEAD, so a
+	// HEAD-only key would skip a repo that is genuinely behind. omitempty so a
+	// pre-fix cursor file (no such key) still loads — an absent value
+	// deserialises to "" and therefore never equals a real version, so the repo
+	// is re-evaluated once.
+	LastSeenGoVersion string `json:"last_seen_go_version,omitempty"`
 	// CompletedHeadSHA is the head SHA whose update task this watcher has
 	// already auto-completed via a complete-task command (a merged update PR
 	// was observed). Prevents re-publishing the same completion every cycle —

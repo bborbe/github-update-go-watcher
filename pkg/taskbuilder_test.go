@@ -127,11 +127,12 @@ var _ = Describe("taskbuilder", func() {
 			Expect(realCmd.Frontmatter["update_scope"]).To(Equal("golang"))
 		})
 
-		It("task_identifier is derived from owner/repo/HEAD", func() {
+		It("task_identifier is derived from owner/repo/Go version/HEAD", func() {
 			realCmd := pkg.BuildCreateCommand(candidate, cfg)
 			expected := pkg.DeriveTaskID(
 				"bborbe",
 				"disk-status",
+				candidate.LatestGo.Number(),
 				"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
 			).String()
 			Expect(string(realCmd.TaskIdentifier)).To(Equal(expected))

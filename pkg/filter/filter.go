@@ -13,7 +13,7 @@
 //  4. GoBehindFilter       -> "go_current"           — at or ahead of stable
 //  5. AutoUpdateFilter     -> "auto_update_disabled" | "auto_update_undecided"
 //     — owner refused, or has not answered at all
-//  6. SHAUnchangedFilter   -> "sha_unchanged"        — HEAD already reported
+//  6. SHAUnchangedFilter   -> "sha_unchanged"      — HEAD and target Go version already reported
 //
 // Filters 1-5 are cycle-invariant and built once at wiring time.
 // SHAUnchangedFilter is composed in per cycle because it needs a fresh
@@ -30,6 +30,11 @@ type Candidate struct {
 	RepoKey string
 	// HeadSHA is the full HEAD SHA of the default branch.
 	HeadSHA string
+	// LatestGoVersion is the cycle's resolved stable Go version in three-part
+	// form (e.g. "1.27.2") — the same value the emitted task carries as
+	// latest_go. A plain string, not pkg.Version, so this package still never
+	// imports pkg.
+	LatestGoVersion string
 	// GoModPresent is false when the repo has no go.mod at all.
 	GoModPresent bool
 	// GoModParsable is false when go.mod exists but carries no readable

@@ -199,15 +199,34 @@ func (w *watcher) processRepos(
 		}
 
 		if w.publisher.PublishCreate(ctx, candidate) {
-			if cursorState.Repos == nil {
-				cursorState.Repos = make(map[string]*RepoState)
-			}
-			cursorState.Repos[repo.Key()] = &RepoState{
-				LastSeenHeadSHA: candidate.HeadSHA,
-			}
+			w.markPublished(cursorState, repo, candidate)
 		}
 	}
 	return ""
+}
+
+// markPublished records a successful publish in the cursor: the repo's HEAD,
+// the cycle's resolved target Go version (the same value the emitted task
+// carries as latest_go, so the recorded key and the filed identifier agree by
+// construction), and the prior completion marker carried forward. The marker
+// must survive: this cycle's merge-detection pass runs right after processRepos
+// and is suppressed only by LastSeenHeadSHA == CompletedHeadSHA, so a fresh
+// RepoState would wipe it and the pass would publish a CompleteCommand for the
+// task this cycle just filed.
+func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candidate) {
+	if cursorState.Repos == nil {
+		cursorState.Repos = make(map[string]*RepoState)
+	}
+	previous := cursorState.Repos[repo.Key()]
+	var completedHeadSHA string
+	if previous != nil {
+		completedHeadSHA = previous.CompletedHeadSHA
+	}
+	cursorState.Repos[repo.Key()] = &RepoState{
+		LastSeenHeadSHA:   candidate.HeadSHA,
+		LastSeenGoVersion: candidate.LatestGo.Number(),
+		CompletedHeadSHA:  completedHeadSHA,
+	}
 }
 
 // openUpdatePRGate applies the always-on open-PR in-flight gate (spec 003) to
@@ -368,7 +387,7 @@ func (w *watcher) completeTask(
 	state *RepoState,
 	headSHA string,
 ) {
-	taskID := DeriveTaskID(repo.Owner, repo.Name, headSHA)
+	taskID := DeriveTaskID(repo.Owner, repo.Name, state.LastSeenGoVersion, headSHA)
 	if err := w.completeSender.SendCommand(ctx, task.CompleteCommand{
 		TaskIdentifier: agentlib.TaskIdentifier(taskID.String()),
 	}); err != nil {
