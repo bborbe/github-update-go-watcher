@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-09T14:27:19Z"
 generating: "2026-10-09T15:04:51Z"
 prompted: "2026-10-09T15:04:51Z"
+verifying: "2026-10-09T15:20:41Z"
 branch: dark-factory/bug-sha-unchanged-skips-new-go-release
 ---
 
