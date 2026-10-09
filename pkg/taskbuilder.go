@@ -42,7 +42,7 @@ func ComputeTaskTitle(c Candidate) string {
 
 // BuildCreateCommand assembles the CreateTaskCommand for a Candidate.
 func BuildCreateCommand(c Candidate, cfg TaskConfig) task.CreateCommand {
-	taskIDStr := DeriveTaskID(c.Repo.Owner, c.Repo.Name, c.HeadSHA).String()
+	taskIDStr := DeriveTaskID(c.Repo.Owner, c.Repo.Name, c.LatestGo.Number(), c.HeadSHA).String()
 	return task.CreateCommand{
 		Title:          ComputeTaskTitle(c),
 		TaskIdentifier: agentlib.TaskIdentifier(taskIDStr),

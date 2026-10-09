@@ -16,14 +16,15 @@ import (
 var taskIDNamespace = uuid.MustParse("8a9e45ee-da1f-4939-a3b5-11201f600a1a")
 
 // DeriveTaskID returns a UUID5 derived deterministically from
-// (owner, repo, headSHA) via the seed "update-go-<owner>-<repo>-<headSHA>"
-// (spec Desired Behavior 6).
+// (owner, repo, goVersion, headSHA) via the seed
+// "update-go-<owner>-<repo>-<goVersion>-<headSHA>".
 //
-// Same repo at the same HEAD always yields the same identifier, so a re-emit
-// is a downstream no-op; a new HEAD yields a new identifier, so a new commit
-// correctly produces a fresh work item.
-func DeriveTaskID(owner, repo, headSHA string) uuid.UUID {
-	seed := fmt.Sprintf("update-go-%s-%s-%s", owner, repo, headSHA)
+// Same repo at the same HEAD and the same target Go version always yields the
+// same identifier, so a re-emit is a downstream no-op; a new HEAD OR a new
+// target Go version yields a new identifier, so a new commit and a new stable
+// Go release each correctly produce a fresh work item.
+func DeriveTaskID(owner, repo, goVersion, headSHA string) uuid.UUID {
+	seed := fmt.Sprintf("update-go-%s-%s-%s-%s", owner, repo, goVersion, headSHA)
 	return uuid.NewSHA1(taskIDNamespace, []byte(seed))
 }
 

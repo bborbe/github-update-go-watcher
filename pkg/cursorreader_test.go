@@ -52,3 +52,45 @@ var _ = Describe("NewCursorReader", func() {
 		Expect(r.LastSeenSHA("github.com/bborbe/repo")).To(Equal("abc123"))
 	})
 })
+
+var _ = Describe("CursorReader LastSeenGoVersion", func() {
+	It("nil cursor returns empty string", func() {
+		r := pkg.NewCursorReader(nil)
+		Expect(r.LastSeenGoVersion("github.com/bborbe/repo")).To(Equal(""))
+	})
+
+	It("cursor with nil Repos returns empty string", func() {
+		r := pkg.NewCursorReader(&pkg.Cursor{Repos: nil})
+		Expect(r.LastSeenGoVersion("github.com/bborbe/repo")).To(Equal(""))
+	})
+
+	It("missing key returns empty string", func() {
+		c := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/other": {LastSeenGoVersion: "1.27.2"},
+			},
+		}
+		r := pkg.NewCursorReader(c)
+		Expect(r.LastSeenGoVersion("github.com/bborbe/repo")).To(Equal(""))
+	})
+
+	It("nil RepoState under key returns empty string", func() {
+		c := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/repo": nil,
+			},
+		}
+		r := pkg.NewCursorReader(c)
+		Expect(r.LastSeenGoVersion("github.com/bborbe/repo")).To(Equal(""))
+	})
+
+	It("present key returns recorded version", func() {
+		c := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/repo": {LastSeenGoVersion: "1.27.2"},
+			},
+		}
+		r := pkg.NewCursorReader(c)
+		Expect(r.LastSeenGoVersion("github.com/bborbe/repo")).To(Equal("1.27.2"))
+	})
+})

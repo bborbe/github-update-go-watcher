@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-09T14:27:19Z"
+generating: "2026-10-09T15:04:51Z"
+prompted: "2026-10-09T15:04:51Z"
 branch: dark-factory/bug-sha-unchanged-skips-new-go-release
 ---
 
@@ -27,6 +29,7 @@ A repo is re-evaluated for a Go release whenever the target Go version changes, 
 - The `sha_unchanged` Prometheus label is NOT renamed. It is an operational contract (dashboards, `README.md`, `pkg/metrics.go`), and a rename is a separate change from this fix.
 - The decision-task identity (`DeriveDecisionTaskID`, seeded on `(owner, repo)` only) is NOT changed — it is deliberately SHA-free and re-emits every cycle as a documented no-op.
 - The open-PR gate gets NO new opt-out knob.
+- The merge-detection completion marker stays HEAD-only. Consequence: a release re-filed at an *unchanged* HEAD does not auto-complete — the task waits for the existing close-sweep — because the guard compares `LastSeenHeadSHA` to `CompletedHeadSHA` and both are the same unchanged HEAD. Making the marker version-aware means changing the merge-detection pass, which the Constraints freeze; that is a follow-up spec. A second, smaller window is also left open: on a cold start (missing cursor, the `.corrupt` path, or a lost cursor write) the marker is `""` rather than a stale HEAD, so the same-cycle premature-completion hazard that DB1 guards against is not fully closed there either.
 
 ## Do-Nothing Option
 
@@ -104,7 +107,7 @@ For each, the cursor's `LastSeenHeadSHA` equals HEAD, so the repo can never be r
 
 ## Desired Behavior
 
-1. **The cursor records the target Go version.** `pkg.RepoState` gains a third field, `LastSeenGoVersion string`, serialised as `last_seen_go_version,omitempty` so pre-fix cursor files still load. It holds the cycle's resolved stable Go version in the same three-part form the emitted task carries as `latest_go` (`1.27.2`). It is written in the same place `LastSeenHeadSHA` is written today: only on a successful `PublishCreate`, so a failed publish leaves the repo re-evaluable next cycle.
+1. **The cursor records the target Go version.** `pkg.RepoState` gains a third field, `LastSeenGoVersion string`, serialised as `last_seen_go_version,omitempty` so pre-fix cursor files still load. It holds the cycle's resolved stable Go version in the same three-part form the emitted task carries as `latest_go` (`1.27.2`). It is written beside `LastSeenHeadSHA` on a successful `PublishCreate`, and the existing `CompletedHeadSHA` marker is carried forward rather than dropped: `Poll` runs the merge-detection pass immediately after `processRepos` over the same cursor object, and that pass is suppressed only by `LastSeenHeadSHA == CompletedHeadSHA`, so a fresh `RepoState` literal would defeat the guard and publish a `CompleteCommand` for the task the same cycle just filed. Writing only on a successful `PublishCreate` means a failed publish leaves the repo re-evaluable next cycle.
 2. **The skip is two-key.** The skip reason is returned only when the candidate's HEAD equals the cursor's recorded HEAD **and** the cycle's stable Go version equals the cursor's recorded Go version. A repo whose HEAD is unchanged but whose stable Go advanced is NOT skipped — it proceeds to emit.
 3. **The Go version reaches the filter.** `filter.Candidate` gains the cycle's stable Go version as a plain string, populated from `pkg.Candidate.FilterCandidate()`; the local `filter.CursorReader` interface gains `LastSeenGoVersion(repoKey string) string`, implemented by `pkg.NewCursorReader`. The `filter` package must not import `pkg` (the existing import-cycle constraint in `pkg/filter/filter.go`).
 4. **The task identity folds in the Go version.** `DeriveTaskID` takes the target Go version in addition to `(owner, repo, headSHA)` and seeds `update-go-<owner>-<repo>-<goVersion>-<headSHA>`. A new Go release therefore yields a new identifier even at an unchanged SHA, while a new commit still yields a new identifier as before.

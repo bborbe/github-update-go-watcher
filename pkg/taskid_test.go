@@ -13,19 +13,25 @@ import (
 
 var _ = Describe("DeriveTaskID", func() {
 	It("returns identical UUID for same inputs", func() {
-		id1 := pkg.DeriveTaskID("bborbe", "disk-status", "abc123")
-		id2 := pkg.DeriveTaskID("bborbe", "disk-status", "abc123")
+		id1 := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "abc123")
+		id2 := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "abc123")
 		Expect(id1).To(Equal(id2))
 	})
 
 	It("returns different UUID when sha changes", func() {
-		id1 := pkg.DeriveTaskID("bborbe", "disk-status", "abc123")
-		id2 := pkg.DeriveTaskID("bborbe", "disk-status", "def456")
+		id1 := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "abc123")
+		id2 := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "def456")
+		Expect(id1).NotTo(Equal(id2))
+	})
+
+	It("returns different UUID when only the Go version changes", func() {
+		id1 := pkg.DeriveTaskID("bborbe", "disk-status", "1.26.6", "abc123")
+		id2 := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "abc123")
 		Expect(id1).NotTo(Equal(id2))
 	})
 
 	It("returns VERSION_5 UUID", func() {
-		id := pkg.DeriveTaskID("bborbe", "disk-status", "abc123")
+		id := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", "abc123")
 		Expect(id.Version().String()).To(Equal("VERSION_5"))
 	})
 })

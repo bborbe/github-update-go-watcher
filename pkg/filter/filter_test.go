@@ -214,10 +214,46 @@ var _ = Describe("SHAUnchangedFilter", func() {
 		reason := f.Skip(filter.Candidate{RepoKey: "github.com/bborbe/repo", HeadSHA: "abc123"})
 		Expect(reason).To(BeEmpty())
 	})
+
+	It("same HEAD and same Go version returns sha_unchanged", func() {
+		cursor.shas["github.com/bborbe/repo"] = "abc123"
+		cursor.goVersions = map[string]string{"github.com/bborbe/repo": "1.27.2"}
+		f := filter.NewSHAUnchangedFilter(cursor)
+		reason := f.Skip(filter.Candidate{
+			RepoKey:         "github.com/bborbe/repo",
+			HeadSHA:         "abc123",
+			LatestGoVersion: "1.27.2",
+		})
+		Expect(reason).To(Equal("sha_unchanged"))
+	})
+
+	It("same HEAD but advanced Go version returns empty", func() {
+		cursor.shas["github.com/bborbe/repo"] = "abc123"
+		cursor.goVersions = map[string]string{"github.com/bborbe/repo": "1.26.6"}
+		f := filter.NewSHAUnchangedFilter(cursor)
+		reason := f.Skip(filter.Candidate{
+			RepoKey:         "github.com/bborbe/repo",
+			HeadSHA:         "abc123",
+			LatestGoVersion: "1.27.2",
+		})
+		Expect(reason).To(BeEmpty())
+	})
+
+	It("legacy entry with no recorded Go version returns empty", func() {
+		cursor.shas["github.com/bborbe/repo"] = "abc123"
+		f := filter.NewSHAUnchangedFilter(cursor)
+		reason := f.Skip(filter.Candidate{
+			RepoKey:         "github.com/bborbe/repo",
+			HeadSHA:         "abc123",
+			LatestGoVersion: "1.27.2",
+		})
+		Expect(reason).To(BeEmpty())
+	})
 })
 
 type fakeCursor struct {
-	shas map[string]string
+	shas       map[string]string
+	goVersions map[string]string
 }
 
 func (f *fakeCursor) LastSeenSHA(repoKey string) string {
@@ -225,6 +261,10 @@ func (f *fakeCursor) LastSeenSHA(repoKey string) string {
 		return ""
 	}
 	return f.shas[repoKey]
+}
+
+func (f *fakeCursor) LastSeenGoVersion(repoKey string) string {
+	return f.goVersions[repoKey]
 }
 
 var _ = Describe("Closed set assertion", func() {

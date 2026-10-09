@@ -459,7 +459,8 @@ var _ = Describe("watcher", func() {
 		Context("forced cycle bypasses SHAUnchangedFilter", func() {
 			BeforeEach(func() {
 				cursorContent := `{"repos":{"github.com/bborbe/disk-status":` +
-					`{"last_seen_head_sha":"d630ef3526cfc57fbdccd9ba53c5c3a02945e407"}}}`
+					`{"last_seen_head_sha":"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",` +
+					`"last_seen_go_version":"1.26.6"}}}`
 				err := os.WriteFile(cursorPath, []byte(cursorContent), 0644)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -700,10 +701,54 @@ var _ = Describe("watcher", func() {
 				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
 				_, cmd := completeSender.SendCommandArgsForCall(0)
 				Expect(string(cmd.TaskIdentifier)).To(Equal(
-					pkg.DeriveTaskID("bborbe", "disk-status", headSHA).String(),
+					pkg.DeriveTaskID("bborbe", "disk-status", "1.26.6", headSHA).String(),
 				))
 				Expect(metrics.IncCompletedCallCount()).To(Equal(1))
 			})
+
+			It("derives the completion identifier from the same inputs as the create pass", func() {
+				ghClient.GetMergedUpdatePRReturns(true, nil)
+				buildWatcher()
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+				_, candidate := publisher.PublishCreateArgsForCall(0)
+				createCmd := pkg.BuildCreateCommand(
+					candidate,
+					pkg.TaskConfig{Stage: "prod"},
+				)
+				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
+				_, cmd := completeSender.SendCommandArgsForCall(0)
+				Expect(string(cmd.TaskIdentifier)).To(Equal(string(createCmd.TaskIdentifier)))
+			})
+
+			It(
+				"a legacy cursor entry derives a completion identifier that matches no filed task",
+				func() {
+					// The create pass does not publish this cycle, so the pre-fix
+					// cursor entry (HEAD recorded, no Go version) is what the
+					// completion pass reads: DeriveTaskID is seeded with "" and the
+					// emitted CompleteCommand matches no task filed under a real
+					// version — a downstream no-op, absorbed by the controller.
+					publisher.PublishCreateReturns(false)
+					legacy := `{"repos":{"github.com/bborbe/disk-status":` +
+						`{"last_seen_head_sha":"` + headSHA + `"}}}`
+					Expect(os.WriteFile(cursorPath, []byte(legacy), 0644)).To(Succeed())
+					ghClient.GetMergedUpdatePRReturns(true, nil)
+					buildWatcher()
+
+					err := watcher.Poll(context.Background(), false)
+					Expect(err).NotTo(HaveOccurred())
+
+					Expect(completeSender.SendCommandCallCount()).To(Equal(1))
+					_, cmd := completeSender.SendCommandArgsForCall(0)
+					Expect(string(cmd.TaskIdentifier)).To(Equal(
+						pkg.DeriveTaskID("bborbe", "disk-status", "", headSHA).String(),
+					))
+				},
+			)
 
 			It("does not publish a CompleteCommand when the update PR is not merged", func() {
 				ghClient.GetMergedUpdatePRReturns(false, nil)
@@ -827,6 +872,99 @@ var _ = Describe("watcher", func() {
 
 				// Without the gate, force=true would publish.
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+			})
+		})
+
+		Context("two-key dedup (spec 004)", func() {
+			headSHA := "d630ef3526cfc57fbdccd9ba53c5c3a02945e407"
+			repoKey := "github.com/bborbe/disk-status"
+
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns(headSHA, nil)
+				ghClient.GetGoModReturns([]byte("go 1.26.6"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 27, Patch: 2, Raw: "1.27.2",
+				}, nil)
+				publisher.PublishCreateReturns(true)
+				metrics.IncFilterSkippedStub = func(string) {}
+				buildWatcher()
+			})
+
+			It("same HEAD + advanced Go version publishes a new identifier", func() {
+				seed := `{"repos":{"` + repoKey + `":{"last_seen_head_sha":"` +
+					headSHA + `","last_seen_go_version":"1.26.6"}}}`
+				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+
+				_, candidate := publisher.PublishCreateArgsForCall(0)
+				Expect(candidate.LatestGo.Number()).To(Equal("1.27.2"))
+				cmd := pkg.BuildCreateCommand(candidate, pkg.TaskConfig{Stage: "prod"})
+				Expect(string(cmd.TaskIdentifier)).NotTo(Equal(
+					pkg.DeriveTaskID("bborbe", "disk-status", "1.26.6", headSHA).String(),
+				))
+			})
+
+			It("a publish at unchanged HEAD does not complete the task it just filed", func() {
+				seed := `{"repos":{"` + repoKey + `":{"last_seen_head_sha":"` + headSHA +
+					`","last_seen_go_version":"1.26.6","completed_head_sha":"` + headSHA + `"}}}`
+				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
+				ghClient.GetMergedUpdatePRReturns(true, nil)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
+			})
+
+			It("same HEAD + same Go version is skipped", func() {
+				seed := `{"repos":{"` + repoKey + `":{"last_seen_head_sha":"` + headSHA +
+					`","last_seen_go_version":"1.27.2"}}}`
+				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
+				ghClient.GetGoModReturns([]byte("go 1.27.1"), nil)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+				Expect(metrics.IncFilterSkippedArgsForCall(0)).To(Equal("sha_unchanged"))
+			})
+
+			It("a legacy cursor entry with no recorded Go version is re-evaluated", func() {
+				seed := `{"repos":{"` + repoKey + `":{"last_seen_head_sha":"` + headSHA + `"}}}`
+				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+			})
+
+			It("records the cycle's resolved Go version on a successful publish", func() {
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+				content, err := os.ReadFile(cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(content)).To(ContainSubstring(
+					`"last_seen_go_version":"1.27.2"`,
+				))
+			})
+
+			It("traverses the filter boundary through the real cursor reader", func() {
+				cursor := &pkg.Cursor{Repos: map[string]*pkg.RepoState{
+					repoKey: {LastSeenHeadSHA: headSHA},
+				}}
+				reader := pkg.NewCursorReader(cursor)
+				reason := filter.NewSHAUnchangedFilter(reader).Skip(filter.Candidate{
+					RepoKey:         repoKey,
+					HeadSHA:         headSHA,
+					LatestGoVersion: "1.27.2",
+				})
+				Expect(reason).To(Equal(""))
 			})
 		})
 	})

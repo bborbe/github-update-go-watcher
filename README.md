@@ -77,7 +77,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `go_current` | Declared Go version is at or ahead of stable |
 | `auto_update_disabled` | Repo has `goUpdate.autoUpdate: false` explicitly set in `.maintainer.yaml` |
 | `auto_update_undecided` | `.maintainer.yaml` is absent, has no `goUpdate:` section, has no `autoUpdate` key, or the key holds a non-boolean value — the owner has never answered. A decision task is filed once per repo (see [Decision task contract](#decision-task-contract)) |
-| `sha_unchanged` | Repo HEAD SHA has not changed since last successful cycle (not evaluated on forced cycles) |
+| `sha_unchanged` | Repo HEAD SHA and target Go version are both unchanged since the last successful cycle (not evaluated on forced cycles) |
 | `open_update_pr` | Repo has an open `fix/update-go-*` pull request — an update is already in flight, so no new task is emitted (always-on gate, spec 003) |
 
 ## Emitted task contract
@@ -93,7 +93,7 @@ The watcher publishes one `CreateTaskCommand` per qualifying repo. The command's
 | `phase` | `planning` |
 | `status` | `in_progress` |
 | `stage` | `<STAGE>` (`dev` or `prod`) |
-| `task_identifier` | deterministic UUID5 derived from `(owner, repo, HEAD SHA)` |
+| `task_identifier` | deterministic UUID5 derived from `(owner, repo, target Go version, HEAD SHA)` |
 | `title` | `Update Go <owner>-<repo> <sha[:7]>` (dash, not slash — the vault filename is derived from this verbatim) |
 | `repo` | `<owner>/<repo>` |
 | `clone_url` | `git@github.com:<owner>/<repo>.git` |
