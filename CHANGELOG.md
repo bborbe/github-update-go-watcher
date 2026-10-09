@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.6.5
 
 - chore: update Go to 1.27.2 (`go.mod` + `Dockerfile`) and `golang.org/x/net` to v0.60.0, clearing the new govulncheck advisories (stdlib GO-2026-6599/6600/6604/6605, x/net GO-2026-6603/6617). Pin `GOLANGCI_LINT_VERSION` to v2.14.0 — v2.13.1 cannot decode go1.27.2 export data and fails the lint step.
 - chore: drop the standalone `errcheck` and `gosec` targets from `make check`. Both newest releases (errcheck v1.20.0, gosec v2.29.0) fail to type-check under the go1.27.2 toolchain — their bundled `go/types` cannot decode export data version 5. Both linters stay enabled in `.golangci.yml`, so `lint` still covers them.
