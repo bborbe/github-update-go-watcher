@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: bump `osv-scanner` to v2.6.0 and `golang.org/x/net` to v0.60.0 so the Linux vulnerability gates stop failing. v2.3.1 pins `golang.org/x/tools` v0.38.0, whose SSA builder aborts with `unexpected expr: *ast.KeyValueExpr` on the promoted-field composite-literal key Go 1.27 permits in the Linux stdlib, so a repo on the old pin passes locally on darwin and fails only in Linux CI. `x/net` v0.58.0 carries `GO-2026-6603/6610/6611/6612/6617`, which fail both `vulncheck` and `trivy`.
+
 ## v0.6.5
 
 - chore: update Go to 1.27.2 (`go.mod` + `Dockerfile`) and `golang.org/x/net` to v0.60.0, clearing the new govulncheck advisories (stdlib GO-2026-6599/6600/6604/6605, x/net GO-2026-6603/6617). Pin `GOLANGCI_LINT_VERSION` to v2.14.0 — v2.13.1 cannot decode go1.27.2 export data and fails the lint step.
