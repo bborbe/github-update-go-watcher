@@ -725,13 +725,15 @@ var _ = Describe("watcher", func() {
 			})
 
 			It(
-				"a legacy cursor entry derives a completion identifier that matches no filed task",
+				"a legacy cursor entry completes the task the create pass actually filed",
 				func() {
-					// The create pass does not publish this cycle, so the pre-fix
-					// cursor entry (HEAD recorded, no Go version) is what the
-					// completion pass reads: DeriveTaskID is seeded with "" and the
-					// emitted CompleteCommand matches no task filed under a real
-					// version — a downstream no-op, absorbed by the controller.
+					// The create pass does not publish this cycle, so the cursor entry
+					// (HEAD recorded, no Go version) is what the completion pass reads.
+					// Seeding DeriveTaskID with "" minted the pre-2026-10-09 identifier
+					// and the CompleteCommand matched no task filed under a real
+					// version — a downstream no-op, so the task stayed open forever.
+					// The completion now falls back to the cycle's resolved version,
+					// which is the value the create seeds.
 					publisher.PublishCreateReturns(false)
 					legacy := `{"repos":{"github.com/bborbe/disk-status":` +
 						`{"last_seen_head_sha":"` + headSHA + `"}}}`
@@ -745,6 +747,10 @@ var _ = Describe("watcher", func() {
 					Expect(completeSender.SendCommandCallCount()).To(Equal(1))
 					_, cmd := completeSender.SendCommandArgsForCall(0)
 					Expect(string(cmd.TaskIdentifier)).To(Equal(
+						pkg.DeriveTaskID("bborbe", "disk-status", "1.26.6", headSHA).String(),
+					))
+					// The empty-version seed is the identifier this must NOT emit.
+					Expect(string(cmd.TaskIdentifier)).NotTo(Equal(
 						pkg.DeriveTaskID("bborbe", "disk-status", "", headSHA).String(),
 					))
 				},
