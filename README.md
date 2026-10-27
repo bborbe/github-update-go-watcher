@@ -79,6 +79,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `auto_update_undecided` | `.maintainer.yaml` is absent, has no `goUpdate:` section, has no `autoUpdate` key, or the key holds a non-boolean value — the owner has never answered. A decision task is filed once per repo (see [Decision task contract](#decision-task-contract)) |
 | `sha_unchanged` | Repo HEAD SHA and target Go version are both unchanged since the last successful cycle (not evaluated on forced cycles) |
 | `open_update_pr` | Repo has an open `fix/update-go-*` pull request — an update is already in flight, so no new task is emitted (always-on gate, spec 003) |
+| `emission_in_flight` | Repo was already emitted for the current target Go version and none of the three clearing events has occurred (convergence, an open `fix/update-go-*` PR, or the 14-day backstop). Evaluated before the filter chain, so a claimed repo reports this reason rather than `sha_unchanged` |
 
 ## Emitted task contract
 

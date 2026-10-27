@@ -8,6 +8,11 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: persist an emission claim (`in_flight_target` + `in_flight_since`) in each cursor entry, written only by a successful publish, so the next change can suppress re-emission while a filed update task is still queued; both keys are `omitempty` and older binaries ignore them.
+- fix: stop the watcher filing a second update task for a repo whose first task is still queued. The cursor now carries an emission claim (`in_flight_target` + `in_flight_since`) written by a successful publish, and a repo whose claim still targets the cycle's Go version is skipped with reason `emission_in_flight` — closing the window between emission and the agent's first push, where no `fix/update-go-*` PR exists yet and a second commit re-emitted (two task records, two agent runs, two PRs for one bump; measured on the Go 1.27.2 rollout for `bborbe/agent-code` and `bborbe/agent-gemini`). The claim clears on convergence, on an observed open update PR, or on a 14-day `InFlightTTL` backstop; a GitHub error never clears it, a rate-limited cycle leaves it untouched, and a forced cycle does not bypass it. The open-PR gate, the `sha_unchanged` filter and the task identity seed are unchanged.
+
 ## v0.6.8
 - chore: bump Go toolchain directive to 1.27.3
 

@@ -27,7 +27,7 @@ type Metrics interface {
 
 	// IncFilterSkipped — reason: "scope" | "no_gomod" | "gomod_unparsable" |
 	// "go_current" | "auto_update_disabled" | "auto_update_undecided" |
-	// "sha_unchanged" | "open_update_pr"
+	// "sha_unchanged" | "open_update_pr" | "emission_in_flight"
 	IncFilterSkipped(reason string)
 }
 
@@ -54,6 +54,7 @@ var (
 		"auto_update_undecided",
 		"sha_unchanged",
 		"open_update_pr",
+		"emission_in_flight",
 	}
 )
 

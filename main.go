@@ -106,6 +106,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	metrics := pkg.NewMetrics(nil)
 	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix)
 	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix)
+	currentDateTime := libtime.NewCurrentDateTime()
 	w := factory.CreateWatcher(
 		httpClient,
 		factory.CreateGoDevHTTPClient(),
@@ -117,6 +118,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.Stage,
 		a.UpdateScope,
 		factory.CreateStaticFilters(allowlist),
+		currentDateTime,
 	)
 	gate := pkg.NewCycleGate()
 	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate)

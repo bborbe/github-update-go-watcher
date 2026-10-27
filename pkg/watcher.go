@@ -7,10 +7,12 @@ package pkg
 import (
 	"context"
 	stderrors "errors"
+	"time"
 
 	agentlib "github.com/bborbe/agent"
 	task "github.com/bborbe/agent/command/task"
 	"github.com/bborbe/errors"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
 	"github.com/bborbe/github-update-go-watcher/pkg/filter"
@@ -37,6 +39,10 @@ type Watcher interface {
 // wiring time; SHAUnchangedFilter is composed in per cycle because it needs a
 // fresh CursorReader. completeSender publishes CompleteCommands for repos
 // whose update PR merged (merge-detection → task completion).
+//
+// currentDateTimeGetter is the cycle's clock, used to stamp the emission
+// claim's InFlightSince; it is injected rather than read from the system clock
+// so the recorded time is deterministic under test.
 func NewWatcher(
 	ghClient GitHubClient,
 	goDevClient GoDevClient,
@@ -46,28 +52,31 @@ func NewWatcher(
 	cursorPath string,
 	owner string,
 	taskCreationFilter filter.TaskCreationFilter,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) Watcher {
 	return &watcher{
-		ghClient:           ghClient,
-		goDevClient:        goDevClient,
-		publisher:          publisher,
-		completeSender:     completeSender,
-		metrics:            metrics,
-		cursorPath:         cursorPath,
-		owner:              owner,
-		taskCreationFilter: taskCreationFilter,
+		ghClient:              ghClient,
+		goDevClient:           goDevClient,
+		publisher:             publisher,
+		completeSender:        completeSender,
+		metrics:               metrics,
+		cursorPath:            cursorPath,
+		owner:                 owner,
+		taskCreationFilter:    taskCreationFilter,
+		currentDateTimeGetter: currentDateTimeGetter,
 	}
 }
 
 type watcher struct {
-	ghClient           GitHubClient
-	goDevClient        GoDevClient
-	publisher          TaskPublisher
-	completeSender     task.CompleteCommandSender
-	metrics            Metrics
-	cursorPath         string
-	owner              string
-	taskCreationFilter filter.TaskCreationFilter
+	ghClient              GitHubClient
+	goDevClient           GoDevClient
+	publisher             TaskPublisher
+	completeSender        task.CompleteCommandSender
+	metrics               Metrics
+	cursorPath            string
+	owner                 string
+	taskCreationFilter    filter.TaskCreationFilter
+	currentDateTimeGetter libtime.CurrentDateTimeGetter
 }
 
 func (w *watcher) Poll(ctx context.Context, force bool) error {
@@ -167,10 +176,15 @@ func (w *watcher) processRepos(
 			continue
 		}
 
-		switch w.openUpdatePRGate(ctx, repo) {
-		case "rate_limited":
-			return "rate_limited"
-		case "skip":
+		abortReason, skip := w.gateRepo(ctx, cursorState, repo, candidate)
+		if abortReason != "" {
+			return abortReason
+		}
+		if skip {
+			continue
+		}
+
+		if w.suppressInFlight(ctx, cursorState, repo, candidate) {
 			continue
 		}
 
@@ -212,7 +226,9 @@ func (w *watcher) processRepos(
 // must survive: this cycle's merge-detection pass runs right after processRepos
 // and is suppressed only by LastSeenHeadSHA == CompletedHeadSHA, so a fresh
 // RepoState would wipe it and the pass would publish a CompleteCommand for the
-// task this cycle just filed.
+// task this cycle just filed. It also re-arms the emission claim for the cycle's
+// target version, so a repo that just got a task cannot get a second one while
+// that task is still queued.
 func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candidate) {
 	if cursorState.Repos == nil {
 		cursorState.Repos = make(map[string]*RepoState)
@@ -226,20 +242,41 @@ func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candid
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
+		InFlightTarget:    candidate.LatestGo.Number(),
+		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
 	}
 }
+
+// InFlightTTL is the backstop for an emission claim whose task never opened a
+// pull request. It is not the normal clearing path — convergence and the
+// appearance of the update PR are — so it must be longer than a HEALTHY queue
+// wait or it re-creates the duplicate it exists to prevent. Fourteen days is
+// twice the maximum queue latency measured on the Go 1.27.2 rollout (7 days for
+// bborbe/agent-code, 3.5 days for bborbe/agent-gemini). Revisit when the
+// dispatch-latency work lands: a shorter healthy latency permits a shorter
+// backstop.
+const InFlightTTL = 14 * libtime.Day
 
 // openUpdatePRGate applies the always-on open-PR in-flight gate (spec 003) to
 // repo: an open update PR (fix/update-go-* head branch) means an update task is
 // already underway, so the repo must not be emitted no matter how far head_sha
-// has moved. Returns the repo's cycle action:
+// has moved. Returns the repo's cycle action and, separately, whether an open
+// update PR was actually observed:
 //
-//   - "" — no open update PR, continue normal processing.
-//   - "skip" — repo has an open update PR, or the in-flight check failed
-//     non-fatally: drop the repo from this cycle (nothing is emitted on
-//     uncertainty; the next poll re-checks).
-//   - "rate_limited" — the in-flight check was rate limited: abort the cycle.
-func (w *watcher) openUpdatePRGate(ctx context.Context, repo Repo) string {
+//   - ("", false) — no open update PR, continue normal processing.
+//   - ("skip", true) — repo has an open update PR: drop the repo from this
+//     cycle AND clear the emission claim, because the emission demonstrably
+//     landed (spec 005 DB3).
+//   - ("skip", false) — the in-flight check failed non-fatally: drop the repo
+//     from this cycle (nothing is emitted on uncertainty; the next poll
+//     re-checks). The claim is deliberately NOT cleared here — a transient
+//     GitHub error must not re-arm the emission this spec exists to suppress.
+//   - ("rate_limited", false) — the in-flight check was rate limited: abort the
+//     cycle; the claim is neither written nor cleared.
+func (w *watcher) openUpdatePRGate(
+	ctx context.Context,
+	repo Repo,
+) (string, bool) {
 	openUpdate, err := w.ghClient.HasOpenUpdatePR(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
@@ -247,10 +284,10 @@ func (w *watcher) openUpdatePRGate(ctx context.Context, repo Repo) string {
 				"poll cycle aborted: rate limited during HasOpenUpdatePR owner=%s",
 				w.owner,
 			)
-			return "rate_limited"
+			return "rate_limited", false
 		}
 		dropRepo(repo, "open_update_pr", err)
-		return "skip"
+		return "skip", false
 	}
 	if openUpdate {
 		w.metrics.IncFilterSkipped("open_update_pr")
@@ -259,9 +296,121 @@ func (w *watcher) openUpdatePRGate(ctx context.Context, repo Repo) string {
 			repo.Key(),
 			"open_update_pr",
 		)
-		return "skip"
+		return "skip", true
 	}
-	return ""
+	return "", false
+}
+
+// clearInFlight drops the emission claim for repoKey when it targets target.
+// It mutates the existing RepoState in place — like completeTask does — so
+// LastSeenHeadSHA, LastSeenGoVersion and CompletedHeadSHA survive untouched.
+func clearInFlight(cursorState *Cursor, repoKey, target string) {
+	state := cursorState.Repos[repoKey]
+	if state == nil || state.InFlightTarget != target {
+		return
+	}
+	state.InFlightTarget = ""
+	state.InFlightSince = ""
+}
+
+// inFlightExpired reports whether the claim is past InFlightTTL. An unparsable
+// InFlightSince counts as expired: a bad timestamp must not suppress a repo
+// forever. Expiring fails open — the repo is re-emitted and a duplicate is
+// absorbed downstream by the deterministic task identifier — which is the
+// pre-fix behaviour, not a permanent stall.
+func inFlightExpired(ctx context.Context, state *RepoState, now libtime.DateTime) bool {
+	since, err := libtime.ParseDateTime(ctx, state.InFlightSince)
+	if err != nil {
+		glog.Warningf(
+			"emission claim has unparsable in_flight_since value=%q err=%v",
+			state.InFlightSince,
+			err,
+		)
+		return true
+	}
+	return now.Sub(since) > InFlightTTL
+}
+
+// gateRepo applies the open-PR gate to repo and translates its two-value
+// result into (abortReason, skip). An observed open update PR clears the
+// emission claim — the emission demonstrably landed (spec 005 DB3) — while the
+// gate's error branch leaves it alone, so a transient GitHub error cannot
+// re-arm the emission this spec exists to suppress.
+func (w *watcher) gateRepo(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+) (string, bool) {
+	action, openUpdate := w.openUpdatePRGate(ctx, repo)
+	switch action {
+	case "rate_limited":
+		return "rate_limited", false
+	case "skip":
+		if openUpdate {
+			clearInFlight(cursorState, repo.Key(), candidate.LatestGo.Number())
+		}
+		return "", true
+	}
+	return "", false
+}
+
+// suppressInFlight increments the emission_in_flight counter and logs the
+// routine skip when a live claim must suppress this cycle's emission. It is a
+// helper of processRepos purely to keep that function's cognitive complexity
+// under the linter's ceiling.
+func (w *watcher) suppressInFlight(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+) bool {
+	if !w.emissionInFlight(ctx, cursorState, repo, candidate) {
+		return false
+	}
+	w.metrics.IncFilterSkipped("emission_in_flight")
+	glog.V(2).Infof(
+		"repo skipped repo=%s reason=%s",
+		repo.Key(),
+		"emission_in_flight",
+	)
+	return true
+}
+
+// emissionInFlight reports whether a live emission claim must suppress this
+// cycle's emission for repo, clearing the claim when it is no longer valid.
+// Evaluated after openUpdatePRGate and before the cycle filter chain: the
+// gate's answer is the claim's primary clearing signal and its PR list is
+// already fetched, while the filter chain cannot see the gate's result (a
+// TaskCreationFilter receives only FilterCandidate).
+//
+// A claim only suppresses when it targets the cycle's current target version —
+// a new stable Go release is emitted immediately, exactly as the two-key
+// sha_unchanged gate already allows.
+func (w *watcher) emissionInFlight(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+) bool {
+	target := candidate.LatestGo.Number()
+	state := cursorState.Repos[repo.Key()]
+	if state == nil || state.InFlightTarget == "" || state.InFlightTarget != target {
+		return false
+	}
+	// Convergence: the same predicate the go_current filter uses, so equal-to,
+	// ahead-of and unparsable all clear the claim exactly as that filter drops
+	// the repo. Comparing CurrentGo to LatestGo by equality would leave the
+	// claim live on the ahead-of and unparsable cases.
+	if !candidate.GoBehind() {
+		clearInFlight(cursorState, repo.Key(), target)
+		return false
+	}
+	if inFlightExpired(ctx, state, w.currentDateTimeGetter.Now()) {
+		clearInFlight(cursorState, repo.Key(), target)
+		return false
+	}
+	return true
 }
 
 func (w *watcher) gatherCandidate(

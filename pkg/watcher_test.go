@@ -9,10 +9,14 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 
 	taskmocks "github.com/bborbe/agent/mocks"
+	libtime "github.com/bborbe/time"
+	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/bborbe/github-update-go-watcher/mocks"
 	"github.com/bborbe/github-update-go-watcher/pkg"
@@ -21,14 +25,15 @@ import (
 
 var _ = Describe("watcher", func() {
 	var (
-		ghClient       *mocks.GitHubClient
-		goDevClient    *mocks.GoDevClient
-		publisher      *mocks.TaskPublisher
-		completeSender *taskmocks.TaskCompleteCommandSender
-		metrics        *mocks.Metrics
-		watcher        pkg.Watcher
-		cursorPath     string
-		allowlist      []string
+		ghClient        *mocks.GitHubClient
+		goDevClient     *mocks.GoDevClient
+		publisher       *mocks.TaskPublisher
+		completeSender  *taskmocks.TaskCompleteCommandSender
+		metrics         *mocks.Metrics
+		watcher         pkg.Watcher
+		cursorPath      string
+		allowlist       []string
+		currentDateTime libtime.CurrentDateTime
 	)
 
 	BeforeEach(func() {
@@ -40,6 +45,7 @@ var _ = Describe("watcher", func() {
 		completeSender = new(taskmocks.TaskCompleteCommandSender)
 		metrics = &mocks.Metrics{}
 		allowlist = []string{"github.com/bborbe/disk-status"}
+		currentDateTime = libtime.NewCurrentDateTime()
 	})
 
 	buildWatcher := func() {
@@ -59,6 +65,7 @@ var _ = Describe("watcher", func() {
 			cursorPath,
 			"bborbe",
 			taskFilter,
+			currentDateTime,
 		)
 	}
 
@@ -967,5 +974,292 @@ var _ = Describe("watcher", func() {
 				Expect(reason).To(Equal(""))
 			})
 		})
+
+		Context("emission claim write (spec 005)", func() {
+			const repoKey = "github.com/bborbe/disk-status"
+
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns(
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+					nil,
+				)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				metrics.IncFilterSkippedStub = func(string) {}
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-27T12:00:00Z"))
+				buildWatcher()
+			})
+
+			It("a successful publish records the claim", func() {
+				publisher.PublishCreateReturns(true)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				entry, ok := loaded.Repos[repoKey]
+				Expect(ok).To(BeTrue())
+				Expect(entry.InFlightTarget).To(Equal("1.26.6"))
+				Expect(entry.InFlightSince).To(Equal("2026-10-27T12:00:00Z"))
+			})
+
+			It("a failed publish records no claim", func() {
+				publisher.PublishCreateReturns(false)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				if entry, ok := loaded.Repos[repoKey]; ok {
+					Expect(entry.InFlightTarget).To(BeEmpty())
+					Expect(entry.InFlightSince).To(BeEmpty())
+				}
+				content, err := os.ReadFile(cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(content)).NotTo(ContainSubstring("in_flight_target"))
+			})
+		})
+	})
+})
+
+var _ = Describe("emission claim (spec 005)", func() {
+	var (
+		reg             *prometheus.Registry
+		metrics         pkg.Metrics
+		currentDateTime libtime.CurrentDateTime
+		watcher         pkg.Watcher
+		cursorPath      string
+		ghClient        *mocks.GitHubClient
+		goDevClient     *mocks.GoDevClient
+		publisher       *mocks.TaskPublisher
+		completeSender  *taskmocks.TaskCompleteCommandSender
+	)
+	const (
+		repoKey = "github.com/bborbe/disk-status"
+		oldSHA  = "aaaa000000000000000000000000000000000000"
+		newSHA  = "bbbb000000000000000000000000000000000000"
+	)
+	// now reads the injected clock — never the system clock.
+	now := func() libtime.DateTime { return currentDateTime.Now() }
+
+	BeforeEach(func() {
+		reg = prometheus.NewRegistry()
+		metrics = pkg.NewMetrics(reg)
+		currentDateTime = libtime.NewCurrentDateTime()
+		currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-27T12:00:00Z"))
+		cursorPath = GinkgoT().TempDir() + "/cursor.json"
+		ghClient = &mocks.GitHubClient{}
+		goDevClient = &mocks.GoDevClient{}
+		publisher = &mocks.TaskPublisher{}
+		completeSender = new(taskmocks.TaskCompleteCommandSender)
+
+		ghClient.ListReposReturns([]pkg.Repo{
+			{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+		}, nil)
+		ghClient.GetHeadSHAReturns(newSHA, nil)
+		ghClient.GetGoModReturns([]byte("go 1.27.1"), nil)
+		ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+		ghClient.HasOpenUpdatePRReturns(false, nil)
+		goDevClient.LatestStableReturns(pkg.Version{
+			Major: 1, Minor: 27, Patch: 2, Raw: "1.27.2",
+		}, nil)
+		publisher.PublishCreateReturns(true)
+
+		watcher = pkg.NewWatcher(
+			ghClient,
+			goDevClient,
+			publisher,
+			completeSender,
+			metrics,
+			cursorPath,
+			"bborbe",
+			filter.TaskCreationFilterList{
+				filter.NewRepoAllowlistFilter([]string{"github.com/bborbe/disk-status"}),
+				filter.NewGoModPresentFilter(),
+				filter.NewGoModParsableFilter(),
+				filter.NewGoBehindFilter(),
+				filter.NewAutoUpdateFilter(),
+			},
+			currentDateTime,
+		)
+	})
+
+	writeCursorState := func(repoStateJSON string) {
+		content := `{"repos":{"` + repoKey + `":` + repoStateJSON + `}}`
+		Expect(os.WriteFile(cursorPath, []byte(content), 0600)).To(Succeed())
+	}
+
+	readRepoState := func() *pkg.RepoState {
+		c, err := pkg.LoadCursor(context.Background(), cursorPath)
+		Expect(err).NotTo(HaveOccurred())
+		return c.Repos[repoKey]
+	}
+
+	// filterSkippedValue reads a counter through the registry — never through a
+	// mock spy, and never from a log line (the skip line is V(2)).
+	filterSkippedValue := func(reason string) float64 {
+		families, err := reg.Gather()
+		Expect(err).NotTo(HaveOccurred())
+		for _, f := range families {
+			if f.GetName() != "github_update_go_watcher_filter_skipped_total" {
+				continue
+			}
+			for _, m := range f.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "reason" && l.GetValue() == reason {
+						return m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		Fail("filter_skipped_total series not found reason=" + reason)
+		return 0
+	}
+
+	claimState := func(since libtime.DateTime) string {
+		return `{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.2",` +
+			`"in_flight_target":"1.27.2","in_flight_since":"` +
+			since.Format(time.RFC3339) + `"}`
+	}
+
+	It("a live claim suppresses a second emission", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(0.0))
+	})
+
+	It("convergence clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(readRepoState().InFlightSince).To(BeEmpty())
+		Expect(filterSkippedValue("go_current")).To(Equal(1.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("ahead-of clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go 1.28"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("an unparsable go.mod clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go banana"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("an open update PR clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.HasOpenUpdatePRReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(filterSkippedValue("open_update_pr")).To(Equal(1.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("a GitHub error does not clear the claim", func() {
+		since := now().Add(-libtime.Hour)
+		writeCursorState(claimState(since))
+		ghClient.HasOpenUpdatePRReturns(false, errors.New("open pr check failed"))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+		Expect(readRepoState().InFlightSince).To(Equal(since.Format(time.RFC3339)))
+		Expect(filterSkippedValue("open_update_pr")).To(Equal(0.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+	})
+
+	It("the TTL re-arms the emission", func() {
+		writeCursorState(claimState(now().Add(-(pkg.InFlightTTL + libtime.Hour))))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
+	})
+
+	It("a repo with no claim still emits, and does not emit twice", func() {
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+	})
+
+	It("a forced cycle does not bypass the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+	})
+
+	It("a different target version is not suppressed", func() {
+		writeCursorState(
+			`{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.1",` +
+				`"in_flight_target":"1.27.1","in_flight_since":"` +
+				now().Add(-libtime.Hour).Format(time.RFC3339) + `"}`,
+		)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+	})
+
+	It("an unparsable in_flight_since fails open", func() {
+		writeCursorState(
+			`{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.2",` +
+				`"in_flight_target":"1.27.2","in_flight_since":"not-a-timestamp"}`,
+		)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
+	})
+
+	It("a rate-limited gate leaves the claim untouched", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.HasOpenUpdatePRReturns(false, pkg.ErrRateLimited)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
 	})
 })
