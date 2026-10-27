@@ -16,6 +16,7 @@ import (
 	"github.com/bborbe/kafka"
 	"github.com/bborbe/log"
 	libsentry "github.com/bborbe/sentry"
+	libtime "github.com/bborbe/time"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -93,6 +94,7 @@ func CreateWatcher(
 	stage string,
 	updateScope string,
 	taskCreationFilter filter.TaskCreationFilter,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) pkg.Watcher {
 	ghClient := pkg.NewGitHubClient(githubHTTPClient)
 	goDevClient := pkg.NewGoDevClient(goDevHTTPClient, pkg.DefaultGoDevURL)
@@ -109,6 +111,7 @@ func CreateWatcher(
 		cursorPath,
 		owner,
 		taskCreationFilter,
+		currentDateTimeGetter,
 	)
 }
 

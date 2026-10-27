@@ -7,10 +7,12 @@ package pkg
 import (
 	"context"
 	stderrors "errors"
+	"time"
 
 	agentlib "github.com/bborbe/agent"
 	task "github.com/bborbe/agent/command/task"
 	"github.com/bborbe/errors"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
 	"github.com/bborbe/github-update-go-watcher/pkg/filter"
@@ -37,6 +39,10 @@ type Watcher interface {
 // wiring time; SHAUnchangedFilter is composed in per cycle because it needs a
 // fresh CursorReader. completeSender publishes CompleteCommands for repos
 // whose update PR merged (merge-detection → task completion).
+//
+// currentDateTimeGetter is the cycle's clock, used to stamp the emission
+// claim's InFlightSince; it is injected rather than read from the system clock
+// so the recorded time is deterministic under test.
 func NewWatcher(
 	ghClient GitHubClient,
 	goDevClient GoDevClient,
@@ -46,28 +52,31 @@ func NewWatcher(
 	cursorPath string,
 	owner string,
 	taskCreationFilter filter.TaskCreationFilter,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) Watcher {
 	return &watcher{
-		ghClient:           ghClient,
-		goDevClient:        goDevClient,
-		publisher:          publisher,
-		completeSender:     completeSender,
-		metrics:            metrics,
-		cursorPath:         cursorPath,
-		owner:              owner,
-		taskCreationFilter: taskCreationFilter,
+		ghClient:              ghClient,
+		goDevClient:           goDevClient,
+		publisher:             publisher,
+		completeSender:        completeSender,
+		metrics:               metrics,
+		cursorPath:            cursorPath,
+		owner:                 owner,
+		taskCreationFilter:    taskCreationFilter,
+		currentDateTimeGetter: currentDateTimeGetter,
 	}
 }
 
 type watcher struct {
-	ghClient           GitHubClient
-	goDevClient        GoDevClient
-	publisher          TaskPublisher
-	completeSender     task.CompleteCommandSender
-	metrics            Metrics
-	cursorPath         string
-	owner              string
-	taskCreationFilter filter.TaskCreationFilter
+	ghClient              GitHubClient
+	goDevClient           GoDevClient
+	publisher             TaskPublisher
+	completeSender        task.CompleteCommandSender
+	metrics               Metrics
+	cursorPath            string
+	owner                 string
+	taskCreationFilter    filter.TaskCreationFilter
+	currentDateTimeGetter libtime.CurrentDateTimeGetter
 }
 
 func (w *watcher) Poll(ctx context.Context, force bool) error {
@@ -212,7 +221,9 @@ func (w *watcher) processRepos(
 // must survive: this cycle's merge-detection pass runs right after processRepos
 // and is suppressed only by LastSeenHeadSHA == CompletedHeadSHA, so a fresh
 // RepoState would wipe it and the pass would publish a CompleteCommand for the
-// task this cycle just filed.
+// task this cycle just filed. It also re-arms the emission claim for the cycle's
+// target version, so a repo that just got a task cannot get a second one while
+// that task is still queued.
 func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candidate) {
 	if cursorState.Repos == nil {
 		cursorState.Repos = make(map[string]*RepoState)
@@ -226,6 +237,8 @@ func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candid
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
+		InFlightTarget:    candidate.LatestGo.Number(),
+		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
 	}
 }
 

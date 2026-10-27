@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: persist an emission claim (`in_flight_target` + `in_flight_since`) in each cursor entry, written only by a successful publish, so the next change can suppress re-emission while a filed update task is still queued; both keys are `omitempty` and older binaries ignore them.
+
 ## v0.6.8
 - chore: bump Go toolchain directive to 1.27.3
 

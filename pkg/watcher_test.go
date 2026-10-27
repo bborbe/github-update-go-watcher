@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	taskmocks "github.com/bborbe/agent/mocks"
+	libtime "github.com/bborbe/time"
+	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -21,14 +23,15 @@ import (
 
 var _ = Describe("watcher", func() {
 	var (
-		ghClient       *mocks.GitHubClient
-		goDevClient    *mocks.GoDevClient
-		publisher      *mocks.TaskPublisher
-		completeSender *taskmocks.TaskCompleteCommandSender
-		metrics        *mocks.Metrics
-		watcher        pkg.Watcher
-		cursorPath     string
-		allowlist      []string
+		ghClient        *mocks.GitHubClient
+		goDevClient     *mocks.GoDevClient
+		publisher       *mocks.TaskPublisher
+		completeSender  *taskmocks.TaskCompleteCommandSender
+		metrics         *mocks.Metrics
+		watcher         pkg.Watcher
+		cursorPath      string
+		allowlist       []string
+		currentDateTime libtime.CurrentDateTime
 	)
 
 	BeforeEach(func() {
@@ -40,6 +43,7 @@ var _ = Describe("watcher", func() {
 		completeSender = new(taskmocks.TaskCompleteCommandSender)
 		metrics = &mocks.Metrics{}
 		allowlist = []string{"github.com/bborbe/disk-status"}
+		currentDateTime = libtime.NewCurrentDateTime()
 	})
 
 	buildWatcher := func() {
@@ -59,6 +63,7 @@ var _ = Describe("watcher", func() {
 			cursorPath,
 			"bborbe",
 			taskFilter,
+			currentDateTime,
 		)
 	}
 
@@ -965,6 +970,59 @@ var _ = Describe("watcher", func() {
 					LatestGoVersion: "1.27.2",
 				})
 				Expect(reason).To(Equal(""))
+			})
+		})
+
+		Context("emission claim write (spec 005)", func() {
+			const repoKey = "github.com/bborbe/disk-status"
+
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns(
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+					nil,
+				)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				metrics.IncFilterSkippedStub = func(string) {}
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-27T12:00:00Z"))
+				buildWatcher()
+			})
+
+			It("a successful publish records the claim", func() {
+				publisher.PublishCreateReturns(true)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				entry, ok := loaded.Repos[repoKey]
+				Expect(ok).To(BeTrue())
+				Expect(entry.InFlightTarget).To(Equal("1.26.6"))
+				Expect(entry.InFlightSince).To(Equal("2026-10-27T12:00:00Z"))
+			})
+
+			It("a failed publish records no claim", func() {
+				publisher.PublishCreateReturns(false)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				if entry, ok := loaded.Repos[repoKey]; ok {
+					Expect(entry.InFlightTarget).To(BeEmpty())
+					Expect(entry.InFlightSince).To(BeEmpty())
+				}
+				content, err := os.ReadFile(cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(content)).NotTo(ContainSubstring("in_flight_target"))
 			})
 		})
 	})
