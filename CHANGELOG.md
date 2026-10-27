@@ -8,6 +8,9 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+- fix: **the merge-detection completion seeds `DeriveTaskID` from the cycle's resolved Go version when the cursor entry carries none.** `markPublished` records `candidate.LatestGo`, the same value `BuildCreateCommand` seeds, so a cursor entry written by this code agrees with the create by construction. A cursor entry from before `last_seen_go_version` existed carries an empty string, and seeding from it minted the pre-2026-10-09 identifier (empty goVersion segment) for a task the create filed *with* a version — the `CompleteCommand` addressed a task nobody created, so the real task stayed open forever and the repo kept re-emitting. `completeTask` now falls back to the cycle's resolved version, the only value a create would seed today, and logs a WARNING naming the repo, SHA and chosen version so a legacy entry is visible rather than inferred. The fallback is wrong only if the target version advanced between the create and the merge; the empty seed was wrong always. The cursor test that pinned the old behaviour is inverted: it now asserts the emitted identifier equals the one a create at this HEAD mints, and explicitly not the empty-version one.
+
 ## v0.6.8
 - chore: bump Go toolchain directive to 1.27.3
 

@@ -122,7 +122,7 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 	// auto-completed (complete-task command) instead of sitting in human_review
 	// until a manual close-sweep. Rate-limited here aborts the whole cycle the
 	// same way it does during processRepos — one throttle is shared.
-	if reason := w.completeMergedUpdates(ctx, cursorState, repos); reason != "" {
+	if reason := w.completeMergedUpdates(ctx, cursorState, repos, latestGo); reason != "" {
 		w.metrics.IncPollCycle(reason)
 		// Persist cursor mutations made before the abort (completed-head
 		// markers) so a completion already published this cycle is not
@@ -330,6 +330,7 @@ func (w *watcher) completeMergedUpdates(
 	ctx context.Context,
 	cursorState *Cursor,
 	repos []Repo,
+	latestGo Version,
 ) string {
 	for _, repo := range repos {
 		select {
@@ -371,7 +372,7 @@ func (w *watcher) completeMergedUpdates(
 			continue
 		}
 
-		w.completeTask(ctx, repo, state, state.LastSeenHeadSHA)
+		w.completeTask(ctx, repo, state, state.LastSeenHeadSHA, latestGo)
 	}
 	return ""
 }
@@ -381,13 +382,37 @@ func (w *watcher) completeMergedUpdates(
 // controller's executor is idempotent (skips when ## Resolution is already
 // present), so a lost publish is safe — the next cycle retries. Errors are
 // logged and counted, never fatal to the poll.
+//
+// The identifier must be the one the create minted, or the completion addresses
+// a task that does not exist and the real one stays open forever. markPublished
+// records exactly the value BuildCreateCommand seeds (candidate.LatestGo), so a
+// cursor entry written by this code agrees by construction. A cursor entry from
+// before LastSeenGoVersion existed carries an empty string, and seeding from
+// that mints the pre-2026-10-09 identifier (empty goVersion segment) for a task
+// the create filed WITH a version — a completion for a task nobody created.
+// latestGo is the cycle's resolved version, the same value a create would seed
+// now, so it is the only sound fallback: it is wrong only if the target version
+// advanced between the create and the merge, where the empty seed is wrong
+// always.
 func (w *watcher) completeTask(
 	ctx context.Context,
 	repo Repo,
 	state *RepoState,
 	headSHA string,
+	latestGo Version,
 ) {
-	taskID := DeriveTaskID(repo.Owner, repo.Name, state.LastSeenGoVersion, headSHA)
+	goVersion := state.LastSeenGoVersion
+	if goVersion == "" {
+		goVersion = latestGo.Number()
+		glog.Warningf(
+			"complete-task: cursor entry has no go version, seeding from the cycle repo=%s/%s sha=%s go=%s",
+			repo.Owner,
+			repo.Name,
+			headSHA,
+			goVersion,
+		)
+	}
+	taskID := DeriveTaskID(repo.Owner, repo.Name, goVersion, headSHA)
 	if err := w.completeSender.SendCommand(ctx, task.CompleteCommand{
 		TaskIdentifier: agentlib.TaskIdentifier(taskID.String()),
 	}); err != nil {
