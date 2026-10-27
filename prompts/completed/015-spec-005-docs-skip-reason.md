@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [005-bug-watcher-reemits-while-task-still-queued]
+summary: Rewrote the docs/dod.md in-flight-signal contract to name both the emission window and the open-PR window, added the emission_in_flight row to the README skip-reason table, and appended the fix entry to the existing Unreleased changelog section.
+execution_id: github-update-go-watcher-emission-claim-exec-015-spec-005-docs-skip-reason
+dark-factory-version: v0.198.7
 created: "2026-10-27T22:25:43Z"
 queued: "2026-10-27T22:35:07Z"
+started: "2026-10-27T22:49:43Z"
+completed: "2026-10-27T22:53:13Z"
 ---
 
 <summary>
