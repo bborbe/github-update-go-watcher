@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-27T22:21:46Z"
 generating: "2026-10-27T22:35:12Z"
 prompted: "2026-10-27T22:35:12Z"
+verifying: "2026-10-27T22:53:14Z"
 branch: fix/update-go-emission-claim
 ---
 
