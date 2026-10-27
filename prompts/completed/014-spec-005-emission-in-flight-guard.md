@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [005-bug-watcher-reemits-while-task-still-queued]
+summary: Added the emission-claim guard to the per-repo cycle with convergence/PR/TTL clearing, an emission_in_flight skip-reason metric, and 12 new Ginkgo specs covering all acceptance behaviours
+execution_id: github-update-go-watcher-emission-claim-exec-014-spec-005-emission-in-flight-guard
+dark-factory-version: v0.198.7
 created: "2026-10-27T22:25:43Z"
 queued: "2026-10-27T22:35:04Z"
+started: "2026-10-27T22:44:40Z"
+completed: "2026-10-27T22:49:42Z"
 ---
 
 <summary>
