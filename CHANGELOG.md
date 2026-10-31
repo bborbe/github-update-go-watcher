@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.8.0
 
 - feat: log every non-2xx GitHub API response at the HTTP client boundary (`-v=2`), one line per response carrying `method`, `host`, `path`, `status`, `X-RateLimit-Resource`, `X-RateLimit-Remaining`, `Retry-After` and a 200-rune body snippet — so primary-quota exhaustion and secondary rate limiting are distinguishable in pod logs without a repro. Missing headers and empty bodies log the literal `absent`; the body is restored for the caller; the full URL and request headers are never logged.
 
