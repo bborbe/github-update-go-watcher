@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: log every non-2xx GitHub API response at the HTTP client boundary (`-v=2`), one line per response carrying `method`, `host`, `path`, `status`, `X-RateLimit-Resource`, `X-RateLimit-Remaining`, `Retry-After` and a 200-rune body snippet — so primary-quota exhaustion and secondary rate limiting are distinguishable in pod logs without a repro. Missing headers and empty bodies log the literal `absent`; the body is restored for the caller; the full URL and request headers are never logged.
+
 ## v0.7.0
 
 - feat: persist an emission claim (`in_flight_target` + `in_flight_since`) in each cursor entry, written only by a successful publish, so the next change can suppress re-emission while a filed update task is still queued; both keys are `omitempty` and older binaries ignore them.
