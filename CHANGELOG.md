@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: update github.com/bborbe/agent to v0.138.0, github.com/bborbe/collection to v1.21.6, github.com/bborbe/cqrs to v0.6.15, github.com/bborbe/errors to v1.6.6, github.com/bborbe/http to v1.26.32, github.com/bborbe/kafka to v1.29.11, github.com/bborbe/log to v1.7.6, github.com/bborbe/maintainer to v0.51.0, github.com/bborbe/metrics to v0.6.9, github.com/bborbe/run to v1.11.10, github.com/bborbe/sentry to v1.10.7, github.com/bborbe/service to v1.11.2, github.com/bborbe/time to v1.27.25, github.com/bborbe/validation to v1.5.8, github.com/onsi/ginkgo/v2 to v2.34.0
+
 ## v0.8.0
 
 - feat: log every non-2xx GitHub API response at the HTTP client boundary (`-v=2`), one line per response carrying `method`, `host`, `path`, `status`, `X-RateLimit-Resource`, `X-RateLimit-Remaining`, `Retry-After` and a 200-rune body snippet — so primary-quota exhaustion and secondary rate limiting are distinguishable in pod logs without a repro. Missing headers and empty bodies log the literal `absent`; the body is restored for the caller; the full URL and request headers are never logged.
