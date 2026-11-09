@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: stop re-emitting an update task for a repo with an open `fix/update-go-*` PR — the watcher gains an always-on open-PR in-flight gate (`HasOpenUpdatePR`) that skips the repo with reason `open_update_pr` on every cycle, including forced ones, so a new commit no longer re-files on undrained work; the head-branch prefix now lives in a single constant (`updateBranchPrefix`) shared by the open-PR gate and the merged-PR completion pass
+
 ## v0.8.2
 
 - chore: restate the do-not-merge contract in the gate workflow
