@@ -1,13 +1,10 @@
 ---
-status: verifying
+status: approved
 tags:
     - dark-factory
     - spec
     - bug
 approved: "2026-09-05T11:58:46Z"
-generating: "2026-11-09T09:04:01Z"
-prompted: "2026-11-09T09:10:44Z"
-verifying: "2026-11-09T09:11:02Z"
 branch: dark-factory/bug-update-go-watcher-reemits-open-repo
 ---
 
