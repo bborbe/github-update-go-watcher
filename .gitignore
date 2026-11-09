@@ -16,3 +16,4 @@
 gha-creds-*.json
 /specs/log
 /.crush
+/specs/in-progress/*.lock
