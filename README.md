@@ -35,7 +35,7 @@ Poll-primary, on its own interval — no dependency on Layer 1's signal for corr
 
 ## Status
 
-Implemented. Not yet deployed — deployment (Helm/`quant` chart wiring) is a separate step outside this repo. Once deployed, the binary watches `OWNER` for Go repos behind the current stable release and publishes `CreateTaskCommand` to Kafka on a 10-minute interval (configurable via `POLL_INTERVAL`). Forced scans available via `POST /trigger`.
+Implemented. Not yet deployed — deployment (the Helm chart in `bborbe/nuke`) is a separate step outside this repo. Once deployed, the binary watches `OWNER` for Go repos behind the current stable release and publishes `CreateTaskCommand` to Kafka on a 10-minute interval (configurable via `POLL_INTERVAL`). Forced scans available via `POST /trigger`.
 
 ## Environment variables
 
@@ -45,7 +45,7 @@ Implemented. Not yet deployed — deployment (Helm/`quant` chart wiring) is a se
 | `STAGE` | yes | — | Deployment stage (`dev`\|`prod`), stamped on every emitted task |
 | `KAFKA_BROKERS` | yes | — | Comma-separated list of Kafka brokers |
 | `REPO_ALLOWLIST` | no | empty (allow-all) | Comma-separated host-qualified repo allowlist (`github.com/owner/repo`); empty = allow-all within `OWNER` |
-| `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the `quant` Helm chart) |
+| `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the Helm chart in `bborbe/nuke`) |
 | `POLL_INTERVAL` | no | `10m` | Poll interval as a Go duration (e.g. `5m`, `1h`) |
 | `TOPIC_PREFIX` | no | empty | Kafka topic prefix for CQRS topic construction |
 | `LISTEN` | no | `:9090` | HTTP listen address |
@@ -163,3 +163,16 @@ This verifies the complete path that unit tests cannot reach: GitHub API → fil
 make test      # Run tests
 make precommit # Full development workflow
 ```
+
+## Build
+
+The image builds either on this machine or inside a cluster.
+
+```bash
+make build                                                   # local Docker daemon
+make build BUILD_TARGET=nukeprod REF=<40-char-sha> VERSION=<tag>  # Kubernetes Job in the cluster
+```
+
+`BUILD_TARGET` defaults to `local`; any other value names a cluster alias (`sun`, `nukedev`, `nukeprod`) or a kubectl context and builds inside that cluster through `hack/build-cluster.sh`. The cluster arm requires `VERSION` on the command line — the Makefile default is the newest release tag, and pushing that over a released image is irreversible.
+
+Both arms push `docker.io/bborbe/github-update-go-watcher`. `upload`, `clean` and `buca` are local-only and are refused for a cluster target; the cluster Job pushes from inside the cluster and leaves nothing on this host.

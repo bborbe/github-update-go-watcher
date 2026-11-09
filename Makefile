@@ -6,7 +6,7 @@ include example.env
 # Bare name: Makefile.docker prefixes it with bborbe/ itself, matching the other
 # watcher repos. Deployment is NOT in this repo — the image is published to
 # Docker Hub by an operator running `make buca`, then mirrored and pinned by the
-# Helm release in quant/.
+# Helm release in bborbe/nuke.
 SERVICE = github-update-go-watcher
 
 run:
