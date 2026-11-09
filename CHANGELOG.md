@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: Add a cluster build arm to `Makefile.docker` — `BUILD_TARGET=local` (the default) keeps the local `docker build` unchanged, while any other value dispatches to `hack/build-cluster.sh` to build and push inside that cluster. The local guards are scoped to the local arm, a caller-supplied `VERSION` is mandatory for the cluster arm, and `upload`, `clean` and `buca` are refused for a cluster target.
+
 ## v0.8.2
 
 - chore: restate the do-not-merge contract in the gate workflow

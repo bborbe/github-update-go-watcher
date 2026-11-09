@@ -4,6 +4,13 @@ ifeq ($(VERSION),)
 	VERSION := $(shell git describe --tags `git rev-list --tags --max-count=1`)
 endif
 
+# BUILD_TARGET selects where `make build` runs. `local` (the default) uses the
+# local Docker daemon; any other value names a cluster alias (sun / nukedev /
+# nukeprod) or a kubectl context and builds inside that cluster as a Job
+# rendered from hack/build-job.yaml by hack/build-cluster.sh.
+BUILD_TARGET ?= local
+
+ifeq ($(BUILD_TARGET),local)
 .PHONY: build
 build: check-version-tag check-go-mod
 	@if [ -z "$(VERSION)" ]; then echo "ERROR: no VERSION set and no git tag found — set VERSION=vX.Y.Z or create a tag" >&2; exit 1; fi
@@ -54,15 +61,49 @@ clean:
 	docker image prune -f || true
 	docker builder prune --all -f || true
 	rm -rf vendor
+else
+# The cluster arm builds a named REF in a fresh clone, so the local-tree guards
+# (check-version-tag / check-go-mod) are compiled out above. VERSION must come
+# from the caller: the default at the top of this file is the newest release
+# tag, and pushing that over a released image is irreversible. `$(origin
+# VERSION)` is expanded when this recipe is expanded, after Makefile has
+# assigned the default, so `file` is rejected along with an empty value; only a
+# non-empty `command line` / `environment` VERSION is accepted. The `$(error …)`
+# fires under `make -n` too, unlike a shell `if`.
+.PHONY: build
+build:
+	@$(if $(and $(filter command line environment,$(origin VERSION)),$(strip $(VERSION))),,$(error the cluster arm needs an explicit VERSION; pass VERSION=<scratch-tag>))
+	BUILD_TARGET='$(BUILD_TARGET)' \
+	REPO_URL='https://github.com/bborbe/github-update-go-watcher.git' \
+	REF='$(REF)' \
+	TAG='$(VERSION)' \
+	DOCKERFILE='Dockerfile' \
+	IMAGE='$(DOCKER_REGISTRY)/bborbe/$(SERVICE)' \
+	PUSH='true' \
+	PUSH_SECRET='buildkit-push' \
+	hack/build-cluster.sh
+
+.PHONY: upload clean
+upload clean:
+	@$(error $@ is local-only; BUILD_TARGET=$(BUILD_TARGET) builds and pushes inside the cluster)
+endif
 
 # Publish-only: no k8s in this repo. Deployment is the github-update-go-watcher
-# Helm chart, mirrored into the quant registry and pinned by tag in
-# quant/github-update-go-watcher/. apply is a no-op placeholder.
+# Helm chart, mirrored into the bborbe/nuke registry and pinned by tag there.
+# apply is a no-op placeholder.
 .PHONY: apply
 apply:
 	@echo "skip apply — publish-only"
 
 # Operator-run publish to Docker Hub (requires `docker login`). CI runs
 # `make precommit`, never `buca`, so the unconditional push is safe.
+# upload, clean and buca assume a local Docker daemon; for a cluster target the
+# image is pushed from inside the Job and nothing lands on this host, so they
+# are refused rather than silently no-oping. buca's prerequisites are
+# target-conditional so a cluster buca reaches its own refusal instead of
+# traversing build into the VERSION guard.
 .PHONY: buca
-buca: build upload clean apply
+buca: $(if $(filter local,$(BUILD_TARGET)),build upload clean apply)
+ifneq ($(BUILD_TARGET),local)
+	@$(error buca is local-only; BUILD_TARGET=$(BUILD_TARGET) builds and pushes inside the cluster)
+endif
