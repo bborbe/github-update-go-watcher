@@ -16,11 +16,11 @@ summary: Clears the emission claim when the emitted task is observed terminal, v
 </summary>
 
 <objective>
-Add the fifth clearing path to the emission claim: "the emission's task terminated without converging the repo". The four existing paths are convergence, an observed open update pull request, a changed target Go version, and the `InFlightTTL` backstop; none of them fires when a task dies, so a failed emission suppresses its repo for fourteen days. Land the consumer, the store, the clearing branch, the dedup-key drop, the once-per-task bound, and the tests that prove the four existing paths still clear.
+Add the fifth condition to the emission claim: "the emission's task terminated without converging the repo". Three existing paths end the claim (convergence, an observed open update pull request, and the `InFlightTTL` backstop) and a fourth — a changed target Go version — stops the claim matching without clearing it; none of them fires when a task dies, so a failed emission suppresses its repo for fourteen days. Land the consumer, the store, the clearing branch, the dedup-key drop, the once-per-task bound, and the tests that prove the existing paths still clear.
 </objective>
 
 <context>
-Read `CLAUDE.md` and `docs/dod.md` — its "In-flight signal contract" section is the durable contract this prompt extends (the same change updates its wording).
+Read `docs/dod.md` — its "In-flight signal contract" section (`:32`) is the durable contract this prompt extends (the same change updates its wording). Read `README.md`'s skip-reasons table (`:70-82`) and `pkg/watcher.go`'s `emissionInFlight`.
 
 Read these coding plugin docs before writing code (in-container paths, not host paths):
 - `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md`
@@ -37,12 +37,12 @@ Read these repo files before writing code — every anchor below was verified ag
 - `pkg/filter/sha_unchanged_filter.go` — `:28-36`; it returns `"sha_unchanged"` when `HeadSHA == cursor.LastSeenSHA(repoKey)` **and** `LatestGoVersion == cursor.LastSeenGoVersion(repoKey)`.
 - `pkg/factory/factory.go` — `CreateWatcher` (`:86-116`) is the only construction site.
 - `main.go` — `Run` (`:64-136`) composes `service.Run(ctx, pollLoop, httpServer)` (`:131-135`); it already builds `syncProducer` (`:92-104`) and `libtime.NewCurrentDateTime()` (`:109`). `service.Run` is variadic and already wraps its funcs in `run.CancelOnFirstFinishWait`, so adding a third func needs no new import.
-- `pkg/watcher_test.go` — `buildWatcher` closure and the `emission_in_flight` membership test; the existing emission-claim suite is the regression floor for the four current paths.
+- `pkg/watcher_test.go` — the `buildWatcher` closure and the second `pkg.NewWatcher(` call at `:1076` in the `Describe("emission claim (spec 005)")` suite; that suite is the regression floor for the existing clearing conditions.
 - `docs/dod.md` — the "In-flight signal contract" paragraph (`:32`).
 - `README.md` — the `emission_in_flight` row (`:82`).
 - `specs/in-progress/005-bug-watcher-reemits-while-task-still-queued.md` — Desired Behavior 3 (`:62-65`) and the Failure Modes row at `:84`.
 
-Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watcher` (read it if present in the workspace; otherwise follow the description here):
+Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **not mounted in this container, so the description below is authoritative; do not search for it**:
 - `pkg/retry_guard_consumer.go` — `NewRetryGuardOutcomeMessageHandler` decodes `agentlib.Task` from `msg.Value`, treats the message key as the task identifier, ignores empty values and non-terminal statuses, and clears its record on a terminal one. `NewRetryGuardOutcomeConsumer` wires `libkafka.NewOffsetConsumerHighwaterMarksBatchWithProvider` over `agentlib.TaskV1SchemaID.EventTopic(prefix)` with `NewStoreOffsetManager(NewOffsetStore(db), OffsetOldest, OffsetNewest)`, `BatchSize(1)`, `NewMessageHandlerBatchTxUpdate` + `NewMessageHandlerBatchTx` + `NewMessageHandlerTxSkipErrors`, and a 5s reconnect loop that returns only on `ctx` cancellation.
 - `pkg/memdb.go` — `NewMemDB() libkv.DB`, an in-process `libkv.DB` (the upstream package ships no public memory constructor). Copy it into this repo.
 - `main.go:426-479` — the four-`run.Func` composition under `run.CancelOnFirstFinish`.
@@ -60,7 +60,7 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
 
    Document why it exists and why replay is safe: a session-scoped offset store means a restart replays the event topic from the oldest offset, and the downstream effect is idempotent (the emitted task identifier is a deterministic UUID5).
 
-   Add `github.com/bborbe/kv` as a direct dependency — `go mod tidy` moves it out of the indirect block; it is already in the module graph, as is `github.com/IBM/sarama`.
+   Add `github.com/bborbe/kv` as a direct dependency — write the files that import it first, then run `go mod tidy` last, which moves it out of the indirect block; it is already in the module graph, as is `github.com/IBM/sarama`.
 
 2. **Add `TerminalClaims`.** New `pkg/terminal_claims.go`:
 
@@ -78,7 +78,7 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
    }
    ```
 
-   `NewTerminalClaims(db libkv.DB) TerminalClaims` stores two keys per identifier in bucket `terminal_claims` (`libkv.BucketName("terminal_claims")`), creating the bucket with `CreateBucketIfNotExists` on first write: the bare `taskID` (observed) and `taskID + ":cleared"` (entitlement consumed). `ClaimClearAllowed` reads both under one `Update` transaction and writes the `:cleared` marker when it returns true. No counter, no clock, no TTL, no pruning — the store holds one short UUID per terminal task the topic has ever carried, which is the accepted bound the spec's Failure Modes table names.
+   `NewTerminalClaims(db libkv.DB) TerminalClaims` stores two keys per identifier in bucket `libkv.NewBucketName("terminal_claims")`, creating the bucket with `CreateBucketIfNotExists` on first write: the bare `taskID` (observed) and `taskID + ":cleared"` (entitlement consumed). `ClaimClearAllowed` reads both under one `Update` transaction and writes the `:cleared` marker when it returns true. No counter, no clock, no TTL, no pruning — the store holds one short UUID per terminal task the topic has ever carried, which is the accepted bound the spec's Failure Modes table names.
 
 3. **Add the consumer.** New `pkg/terminal_claims_consumer.go`, shaped exactly after the sibling's retry-guard consumer:
 
@@ -89,7 +89,7 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
 
    `domain` is `github.com/bborbe/vault-cli/pkg/domain`, which `agentlib.TaskFrontmatter.Status()` already returns — it is in the module graph through `github.com/bborbe/agent`.
 
-4. **Thread the store into the watcher.** Add a `terminalClaims TerminalClaims` parameter to `NewWatcher` (place it after `currentDateTimeGetter`) and a field of the same name on the `watcher` struct; add the same parameter to `factory.CreateWatcher` and pass it through. Update every call site — `main.go` and the `buildWatcher` closure in `pkg/watcher_test.go`. The watcher must tolerate a nil-safe zero value only if a test constructs it directly; prefer making every call site pass a real store.
+4. **Thread the store into the watcher.** Add a `terminalClaims TerminalClaims` parameter to `NewWatcher` (place it after `currentDateTimeGetter`) and a field of the same name on the `watcher` struct; add the same parameter to `factory.CreateWatcher` and pass it through. Update every call site — `main.go`, the `buildWatcher` closure in `pkg/watcher_test.go`, and the second `pkg.NewWatcher(` call in the `Describe("emission claim (spec 005)")` suite at `pkg/watcher_test.go:1076`. Do not make the field nil-tolerant: every call site passes a real store, so a nil one is a wiring bug rather than a supported state.
 
 5. **Add the fifth clearing path in `emissionInFlight`.** After the target-match guard and after the convergence branch, before the TTL branch:
 
@@ -131,7 +131,9 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
 
    Rationale to carry in a comment: without the bound, a repo whose task deterministically completes without converging re-emits every poll interval (10m) instead of every 14 days. Note also, in the same comment, that the bound is process-scoped — a restart replays the topic and rebuilds the entitlement, so such a repo re-emits once per restart.
 
-8. **Wire the consumer in `main.go`.** Build `saramaClientProvider := libkafka.NewSaramaClientProviderNew(a.KafkaBrokers)`, `db := pkg.NewMemDB()`, `claims := pkg.NewTerminalClaims(db)`, pass `claims` to `factory.CreateWatcher`, and pass the consumer as a **third** `run.Func` to the existing `service.Run` call:
+   The consumer goroutine and the poll cycle run concurrently and both touch the store, so the store's own `sync.RWMutex` (requirement 1) is the concurrency guard between them; a terminal event arriving mid-cycle simply lands in the next cycle's read, and needs no separate test beyond the store's own.
+
+8. **Wire the consumer in `main.go`.** Build `saramaClientProvider := libkafka.NewSaramaClientProviderNew(kafka.ParseBrokersFromString(a.KafkaBrokers))`, `db := pkg.NewMemDB()`, `claims := pkg.NewTerminalClaims(db)`, pass `claims` to `factory.CreateWatcher`, and pass the consumer as a **third** `run.Func` to the existing `service.Run` call:
 
    ```go
    return service.Run(
@@ -146,7 +148,10 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
 
    The handler stack is the sibling watcher's, reproduced here so this prompt is self-contained: `libkafka.NewOffsetConsumerHighwaterMarksBatchWithProvider(provider, topic, libkafka.NewStoreOffsetManager(libkafka.NewOffsetStore(db), libkafka.OffsetOldest, libkafka.OffsetNewest), libkafka.NewMessageHandlerBatchTxUpdate(db, libkafka.NewMessageHandlerBatchTx(libkafka.NewMessageHandlerTxSkipErrors(handler, log.DefaultSamplerFactory))), libkafka.BatchSize(1), run.NewTrigger(), log.DefaultSamplerFactory)` — wrapped in a `for` loop that reconnects after a 5s delay on error and returns `nil` only when `ctx` is done.
 
-9. **Update the docs in the same change.** `docs/dod.md`'s in-flight paragraph names five clearing events, the terminal set, and the once-per-task bound, and states that the terminal set is rebuilt from the event topic on restart. `README.md`'s `emission_in_flight` row (`:82`) changes "the three clearing events" to four and names the new one. `specs/in-progress/005-…md` Desired Behavior 3 lists five events with a pointer to spec 007, and its Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the terminal event clears the claim on the next cycle; the TTL remains the backstop".
+9. **Update the docs in the same change.** Use these exact phrasings, because the acceptance criteria grep for them:
+   - `docs/dod.md` § In-flight signal contract: the paragraph must contain the word `terminal` and the phrase `once-per-task`. It names four clearing events plus the non-clearing target-change condition (five conditions in total), states the terminal set is `status ∈ {completed, aborted}` (and that `phase: human_review` with `status: in_progress` is not terminal), states the once-per-task bound and that the terminal set is rebuilt from the event topic on restart.
+   - `README.md`'s `emission_in_flight` row (`:82`): replace "the three clearing events" with the phrase `four clearing events` and name the new one (the emitted task reaching a terminal status).
+   - `specs/in-progress/005-…md`: Desired Behavior 3 (`:62-65`) gains the phrase `terminal status` as the fifth condition with a pointer to spec 007; the Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the terminal event ends the claim on the next cycle; the TTL remains the backstop".
 
 10. **Tests.** Follow the repo's Ginkgo/Gomega conventions (`DescribeTable`/`Entry`, no `for range` + `t.Run`, the injected clock, Counterfeiter for the new interface). Cover, in the existing emission-claim suite:
 
@@ -156,9 +161,11 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
     - **The four existing conditions still work** — convergence, an observed open update PR, TTL expiry, and a different target version — with their existing assertions untouched.
     - **Negative controls:** a `HasOpenUpdatePR` error does not clear; a forced cycle with a live claim and no terminal observation does not emit.
     - **Store errors do not clear:** `ClaimClearAllowed` returning an error leaves the claim intact and the repo suppressed.
-    - **Consumer handler:** four events — `completed`, `aborted`, `in_progress`, and an empty-value delete — leave the store reporting observed-terminal for the first two and not for the last two, and `ClaimClearAllowed` returns true exactly once for a single-observation identifier and false on a second call.
+    - **Consumer handler:** four events — `completed`, `aborted`, `in_progress`, and an empty-value delete — leave the store reporting observed-terminal for the first two and not for the last two, and `ClaimClearAllowed` returns true exactly once for a single-observation identifier and false on a second call. Build each payload by marshalling a real `agentlib.Task` (round-trip through the wire type) rather than hand-writing JSON, so a field or tag mismatch cannot pass. Also assert `terminalClaimsTopic(prefix)` equals `agentlib.TaskV1SchemaID.EventTopic(prefix)` for a non-empty prefix.
     - **Consumer lifecycle:** a handler error is skipped and the loop continues until `ctx` is cancelled, returning `nil`.
-    - **Composition:** `main_test.go` asserts the third `run.Func` passed to `service.Run` is the terminal-claims consumer — identity, not a count, so a declared-but-uncalled constructor cannot pass.
+    - **Composition:** `main_test.go` is `package main_test` and cannot import `main`, so assert over the source: parse `main.go` with `go/parser`, locate the `service.Run(...)` call, and require its third argument to be a `pkg.NewTerminalClaimsConsumer(...)` call — identity, not a count, so a declared-but-uncalled constructor cannot pass.
+    - **The in-process DB satisfies the upstream contract:** `pkg/memdb_test.go` drives `NewMemDB` through the real consumer path — `libkv.NewOffsetStore(memdb)` puts a key, reads it back in a second `Update` transaction, and confirms it survives — plus a table over the `libkv.DB` surface: `CreateBucketIfNotExists` then `Bucket`, a missing bucket returning `libkv.BucketNotFoundError`, a missing key returning an empty `Item` and no error, forward and reverse iteration over three keys in key order, and `Seek` landing on the first key ≥ the sought key. This file is a new ~150-line implementation of an upstream interface; the repo DoD requires new functions to have tests, and every consumer behaviour above runs on it.
+    - **Self-check.** Before finishing, re-run `<verification>` and confirm every command passes; then walk each acceptance criterion from spec 007 against the change and say in the prompt log which one each piece of code satisfies.
 
 </requirements>
 
@@ -175,12 +182,14 @@ Reference implementation to mirror, in the sibling repo `bborbe/github-pr-watche
 
 <verification>
 ```bash
-cd ~/Documents/workspaces/github-update-go-watcher-emission-terminal
-make precommit                     # format + lint + test + security; must exit 0
-go test ./pkg/... -count=1         # the Ginkgo suites behind the acceptance criteria
-grep -n "terminal" docs/dod.md README.md specs/in-progress/005-*.md
+ROOTDIR=/workspace make precommit    # format + lint + test + security; must exit 0
+go test ./pkg/... -count=1           # the Ginkgo suites behind the acceptance criteria
 go test ./pkg/... -count=1 -run TestSuite -ginkgo.focus='emission'   # the claim suite alone
+grep -n "terminal" docs/dod.md README.md specs/in-progress/005-*.md
+awk '/service.Run\(/,/\)/' main.go
 ```
 
-The failing-first evidence is the RED run's own output: the terminal-observation fixture asserts 1 publish and reads 0, with `filter_skipped_total{reason="emission_in_flight"}` at 1. Commit that RED run before the implementation.
+`ROOTDIR=/workspace` is required, not cosmetic: this repo's `Makefile.variables` derives `ROOTDIR` from `git rev-parse --show-toplevel`, and the container masks `.git`, so an unqualified `make` dies before running any target. Never `cd` to a host path — the repo is `/workspace` inside the container.
+
+The failing-first evidence is the RED run's own output: the terminal-observation fixture asserts 1 publish and reads 0, with `filter_skipped_total{reason="emission_in_flight"}` at 1. The RED output is recorded in the prompt log, not committed — dark-factory owns the commit and `.git` is masked in this container.
 </verification>
