@@ -58,7 +58,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 ## Non-goals
 
 - **`InFlightTTL` is not shortened.** It stays the 336h backstop for a claim whose task is still running (or whose terminal event was missed). This adds the missing signal; it does not retune the fallback.
-- **`phase: human_review` DOES end a claim, and that is deliberate.** A record parked there is owned by nobody ([[A github-update-go Record Routed to human_review Is Owned by Nobody]] closed, and 36 records are still parked), so treating it as live is what freezes the pipeline. It is not "terminal" in the state-machine sense — the distinction this spec draws is **dispatchability**, and the open-PR gate above it keeps a genuinely in-flight review suppressing.
+- **`phase: human_review` DOES end a claim, and that is deliberate.** A record parked there is owned by nobody ([[A github-update-go Record Routed to human_review Is Owned by Nobody]] closed, and 39 records are still parked), so treating it as live is what freezes the pipeline. It is not "terminal" in the state-machine sense — the distinction this spec draws is **dispatchability**, and the open-PR gate above it keeps a genuinely in-flight review suppressing.
 - **The open-PR gate, the `sha_unchanged` two-key rule, the task identity seed and the consent filters are unchanged.**
 - **No vault read, no task-store query, no new chart value, no new PVC.**
 - **The controller-side supersede refinement and the repo-trigger's identifier seed are untouched.**
@@ -71,7 +71,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 
 1. **A task lifecycle consumer runs beside the poll loop.** A new `run.Func` is passed to `service.Run` in `main.go` alongside the existing poll loop and HTTP server. It subscribes to `agentlib.TaskV1SchemaID.EventTopic(prefix)` — derived from the schema id and the configured prefix, never a bare literal, or it subscribes to the wrong topic under a prefix — and it never returns on a recoverable error: `service.Run` wraps every func in `run.CancelOnFirstFinishWait` (`github.com/bborbe/service` `service_run.go:29`), so a return would tear down the poll loop and the HTTP server.
 
-   **Offset state is in-process, so a restart replays the topic from its oldest offset.** That is the `github-pr-watcher` precedent, and here the replay is a feature rather than a cost: it rebuilds the terminal set from history, so the first deploy ends the pre-existing frozen claims without an operator sweep. The prompt carries the concrete constructor wiring; this spec fixes only the behaviour.
+   **Offset state is in-process, so a restart replays the topic from its oldest offset.** That is the `github-pr-watcher` precedent, and here the replay is a feature rather than a cost: it rebuilds the non-progressing set from history, so the first deploy ends the pre-existing frozen claims without an operator sweep. The prompt carries the concrete constructor wiring; this spec fixes only the behaviour.
 
 2. **The handler records identifiers whose task can no longer progress.** The event payload decodes to `agentlib.Task`; the task identifier is the message key. An empty payload is a delete event and is ignored. **Non-progressing** is `status ∈ {completed, aborted}` **or** `phase == human_review` — the two populations no Config will dispatch. `Frontmatter.Phase()` returns a pointer, so an absent phase is neither terminal nor parked and is ignored. Every other status (`in_progress`, `next`, `backlog`, `hold` at a dispatchable phase) is ignored: a queued or running task must keep its claim.
 
@@ -91,7 +91,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 
 ## Constraints
 
-- No vault, task-store or filesystem read. The terminal set lives in the process; the event stream is subscribed, not queried. `docs/dod.md:30` is a durable contract.
+- No vault, task-store or filesystem read. The non-progressing set lives in the process; the event stream is subscribed, not queried. `docs/dod.md:30` is a durable contract.
 - No new cursor field, no new chart value, no new PVC, no new config knob, no new GitHub API call.
 - **One new module dependency:** `github.com/bborbe/kv`, for the in-process offset store — the upstream package ships no public memory constructor, so the repo carries a minimal implementation. It is already in the module graph; `go mod tidy` moves it out of the indirect block.
 - Do not change `InFlightTTL`, `DeriveTaskID`, `openUpdatePRGate`'s semantics, or `SHAUnchangedFilter`'s rule. The dedup-key drop happens in the cursor, not in the filter.
@@ -107,7 +107,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 | Task ends `aborted`/`completed`, repo still behind | Claim ended on the next cycle; one `PublishCreate`; dedup keys dropped so the unchanged-HEAD gate passes | Normal emission path; a fresh claim is written |
 | The re-emitted task ends terminal again at the same HEAD | Second sighting — entitlement already consumed, claim kept, TTL governs | 14-day backstop, as today; a HEAD move produces a new identifier and a fresh entitlement |
 | Terminal event arrives while a poll cycle is mid-flight | The end applies to the next cycle; the current cycle already evaluated its claim | Bounded to one cycle |
-| Consumer restarts / pod restarts | Replay from the oldest offset rebuilds the terminal set and re-arms every consumed entitlement; offsets are in-process by design | Self-healing — the replay also ends claims left by pre-fix failures. Cost: a deterministically failing repo re-emits once per restart (bounded, visible) |
+| Consumer restarts / pod restarts | Replay from the oldest offset rebuilds the non-progressing set and re-arms every consumed entitlement; offsets are in-process by design | Self-healing — the replay also ends claims left by pre-fix failures. Cost: a deterministically failing repo re-emits once per restart (bounded, visible) |
 | Event topic unavailable | The consumer logs and retries; the poll loop keeps running with the TTL as its only backstop | Fix the broker; no state is lost because replay is from the oldest offset |
 | Malformed event payload | The handler is wrapped in a skip-errors sampler; the consumer keeps consuming | Nothing — one skipped event cannot wedge the loop |
 | Non-progressing event (`completed`, `aborted`, or `phase: human_review`) | Recorded; the next cycle may end the claim once | — |
@@ -187,7 +187,7 @@ The skip count must fall below the pre-fix 42 for the repos whose tasks are term
 ## Design Decisions
 
 - **Event stream, not a store read.** `docs/dod.md:30` forbids the vault read; the task lifecycle topic is already consumed by `github-pr-watcher` for exactly this purpose (release a suppression when a task reaches a terminal status), so this is a proven shape rather than a new coupling.
-- **In-process store, replay on restart.** The sibling watcher accepts replay-from-oldest because the downstream effect is idempotent. Here the replay is a feature: it reconstructs the terminal set from history, so the first deploy ends the pre-existing 42 claims without an operator sweep.
+- **In-process store, replay on restart.** The sibling watcher accepts replay-from-oldest because the downstream effect is idempotent. Here the replay is a feature: it reconstructs the non-progressing set from history, so the first deploy ends the pre-existing 42 claims without an operator sweep.
 - **The identifier is derived, not stored.** An `InFlightTaskID` cursor field would duplicate information `LastSeenHeadSHA` + `InFlightTarget` already carry exactly, and would need a migration for every live claim.
 - **Drop the dedup keys when ending a failed emission.** Without it the re-emit is suppressed by `SHAUnchangedFilter` and the whole path is inert — the failure mode a naive implementation would ship.
 - **Once-per-task bound.** The alternative — end the claim on every terminal sighting — turns a 14-day re-emit period into a 10-minute one for any repo whose task deterministically completes without converging. Bounding at one attempt per identifier keeps the blast radius to "one extra emission per failed emission".
