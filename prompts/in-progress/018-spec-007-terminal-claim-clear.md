@@ -55,7 +55,7 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
 
    - `Update(ctx, fn func(ctx, libkv.Tx) error) error` and `View(ctx, fn …) error`, both holding a `sync.RWMutex` and passing a tx backed by `map[string]map[string][]byte`;
    - `Sync() error`, `Close() error`, `Remove() error`, `Stats(ctx) (*libkv.Stats, error)`, `StatsDetailed(ctx) (*libkv.Stats, error)`;
-   - tx methods `Bucket`, `CreateBucket`, `CreateBucketIfNotExists`, `DeleteBucket`, `ListBucketNames` — `Bucket` returns `libkv.BucketNotFoundError` when absent;
+   - tx methods `Bucket`, `CreateBucket`, `CreateBucketIfNotExists`, `DeleteBucket`, `ListBucketNames` — `Bucket` returns `libkv.ErrBucketNotFound` when absent;
    - bucket methods `Put`, `Get` (a missing key returns `libkv.NewByteItem(key, nil)`, not an error), `Delete`, `Iterator`, `IteratorReverse`;
    - an iterator implementing `Close`, `Item`, `Next`, `Valid`, `Rewind`, `Seek` over a sorted key slice, with `Seek` using `sort.Search` and reversing the comparison for the reverse iterator.
 
@@ -80,7 +80,7 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
    }
    ```
 
-   `NewTerminalClaims(db libkv.DB) TerminalClaims` stores two keys per identifier in bucket `libkv.NewBucketName("terminal_claims")`, creating the bucket with `CreateBucketIfNotExists` on first write: the bare `taskID` (observed) and `taskID + ":cleared"` (entitlement consumed). `ClaimClearAllowed` reads both under one `Update` transaction and writes the `:cleared` marker when it returns true. No counter, no clock, no TTL, no pruning — the store holds one short UUID per terminal task the topic has ever carried, which is the accepted bound the spec's Failure Modes table names.
+   `NewTerminalClaims(db libkv.DB) TerminalClaims` stores two keys per identifier in bucket `libkv.NewBucketName("terminal_claims")`, creating the bucket with `CreateBucketIfNotExists` on first write: the bare `taskID` (observed) and `taskID + ":cleared"` (entitlement consumed). **Both values must be non-empty** — write `[]byte{1}`, never `nil`: `libkv`'s `byteItem.Exists()` is `len(value) > 0`, so an empty value reads back as absent and `Observe` would be silently inert. `ClaimClearAllowed` reads both under one `Update` transaction and writes the `:cleared` marker when it returns true; it treats `libkv.ErrBucketNotFound` as "not observed" and returns `(false, nil)`, so a fresh process does not log a warning per claimed repo per cycle before any event has been consumed. No counter, no clock, no TTL, no pruning — the store holds one short UUID per non-progressing task the topic has ever carried, which is the accepted bound the spec's Failure Modes table names.
 
 3. **Add the consumer.** New `pkg/terminal_claims_consumer.go`, shaped exactly after the sibling's retry-guard consumer:
 
@@ -135,7 +135,7 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
 
    The consumer goroutine and the poll cycle run concurrently and both touch the store, so the store's own `sync.RWMutex` (requirement 1) is the concurrency guard between them; a terminal event arriving mid-cycle simply lands in the next cycle's read, and needs no separate test beyond the store's own.
 
-8. **Wire the consumer in `main.go`.** Build `saramaClientProvider := libkafka.NewSaramaClientProviderNew(kafka.ParseBrokersFromString(a.KafkaBrokers))`, `db := pkg.NewMemDB()`, `claims := pkg.NewTerminalClaims(db)`, pass `claims` to `factory.CreateWatcher`, and pass the consumer as a **third** `run.Func` to the existing `service.Run` call:
+8. **Wire the consumer in `main.go`.** Build `saramaClientProvider := kafka.NewSaramaClientProviderNew(kafka.ParseBrokersFromString(a.KafkaBrokers))`, `db := pkg.NewMemDB()`, `claims := pkg.NewTerminalClaims(db)`, pass `claims` to `factory.CreateWatcher`, and pass the consumer as a **third** `run.Func` to the existing `service.Run` call:
 
    ```go
    return service.Run(
@@ -151,9 +151,9 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
    The handler stack is the sibling watcher's, reproduced here so this prompt is self-contained: `libkafka.NewOffsetConsumerHighwaterMarksBatchWithProvider(provider, topic, libkafka.NewStoreOffsetManager(libkafka.NewOffsetStore(db), libkafka.OffsetOldest, libkafka.OffsetNewest), libkafka.NewMessageHandlerBatchTxUpdate(db, libkafka.NewMessageHandlerBatchTx(libkafka.NewMessageHandlerTxSkipErrors(handler, log.DefaultSamplerFactory))), libkafka.BatchSize(1), run.NewTrigger(), log.DefaultSamplerFactory)` — wrapped in a `for` loop that reconnects after a 5s delay on error and returns `nil` only when `ctx` is done.
 
 9. **Update the docs in the same change.** Use these exact phrasings, because the acceptance criteria grep for them:
-   - `docs/dod.md` § In-flight signal contract: the paragraph must contain the phrase `once-per-task`. It names four clearing events plus the non-clearing target-change condition (five conditions in total), defines the fifth as *dispatchability* — a terminal status **or** `phase: human_review` — states that a task queued or running at a dispatchable phase does not clear, states the once-per-task bound, and states that the set is rebuilt from the event topic on restart.
+   - `docs/dod.md` § In-flight signal contract: the paragraph must contain the word `terminal` and the phrase `once-per-task`. It names four clearing events plus the non-clearing target-change condition (five conditions in total), defines the fifth as *dispatchability* — a terminal status **or** `phase: human_review` — states that a task queued or running at a dispatchable phase does not clear, states the once-per-task bound, and states that the set is rebuilt from the event topic on restart.
    - `README.md`'s `emission_in_flight` row (`:82`): replace "the three clearing events" with the phrase `four clearing events` and name the new one (the emitted task can no longer progress — terminal or parked at `human_review`).
-   - `specs/in-progress/005-…md`: Desired Behavior 3 (`:62-65`) gains the fifth condition with a pointer to spec 007; the Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the non-progressing event ends the claim on the next cycle; the TTL remains the backstop".
+   - `specs/in-progress/005-…md`: Desired Behavior 3 (`:62-65`) gains the phrase `terminal status` as the fifth condition with a pointer to spec 007; the Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the non-progressing event ends the claim on the next cycle; the TTL remains the backstop".
 
 10. **Tests.** Follow the repo's Ginkgo/Gomega conventions (`DescribeTable`/`Entry`, no `for range` + `t.Run`, the injected clock, Counterfeiter for the new interface). Cover, in the existing emission-claim suite:
 
@@ -168,7 +168,7 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
     - **Consumer handler:** six events — `completed`, `aborted`, `in_progress`+`human_review`, `in_progress`+`execution`, `next`+`planning`, and an empty-value delete — leave the store reporting observed for the first three and not for the last three, and `ClaimClearAllowed` returns true exactly once for a single-observation identifier and false on a second call. Build each payload by marshalling a real `agentlib.Task` (round-trip through the wire type) rather than hand-writing JSON, so a field or tag mismatch cannot pass. Also assert `terminalClaimsTopic(prefix)` equals `agentlib.TaskV1SchemaID.EventTopic(prefix)` for a non-empty prefix.
     - **Consumer lifecycle:** a handler error is skipped and the loop continues until `ctx` is cancelled, returning `nil`.
     - **Composition:** `main_test.go` is `package main_test` and cannot import `main`, so assert over the source: parse `main.go` with `go/parser`, locate the `service.Run(...)` call, and require its third argument to be a `pkg.NewTerminalClaimsConsumer(...)` call — identity, not a count, so a declared-but-uncalled constructor cannot pass.
-    - **The in-process DB satisfies the upstream contract:** `pkg/memdb_test.go` drives `NewMemDB` through the real consumer path — `libkv.NewOffsetStore(memdb)` puts a key, reads it back in a second `Update` transaction, and confirms it survives — plus a table over the `libkv.DB` surface: `CreateBucketIfNotExists` then `Bucket`, a missing bucket returning `libkv.BucketNotFoundError`, a missing key returning an empty `Item` and no error, forward and reverse iteration over three keys in key order, and `Seek` landing on the first key ≥ the sought key. This file is a new ~150-line implementation of an upstream interface; the repo DoD requires new functions to have tests, and every consumer behaviour above runs on it.
+    - **The in-process DB satisfies the upstream contract:** `pkg/memdb_test.go` drives `NewMemDB` through the real consumer path — `libkafka.NewOffsetStore(memdb)` puts a key, reads it back in a second `Update` transaction, and confirms it survives — plus a table over the `libkv.DB` surface: `CreateBucketIfNotExists` then `Bucket`, a missing bucket returning `libkv.ErrBucketNotFound`, a missing key returning an empty `Item` and no error, forward and reverse iteration over three keys in key order, and `Seek` landing on the first key ≥ the sought key. This file is a new ~150-line implementation of an upstream interface; the repo DoD requires new functions to have tests, and every consumer behaviour above runs on it.
     - **Self-check.** Before finishing, re-run `<verification>` and confirm every command passes; then walk each acceptance criterion from spec 007 against the change and say in the prompt log which one each piece of code satisfies.
 
 </requirements>
@@ -189,7 +189,7 @@ Reference implementation, in the sibling repo `bborbe/github-pr-watcher` — **n
 ROOTDIR=/workspace make precommit    # format + lint + test + security; must exit 0
 go test ./pkg/... -count=1           # the Ginkgo suites behind the acceptance criteria
 go test ./pkg/... -count=1 -run TestSuite -ginkgo.focus='emission'   # the claim suite alone
-grep -n "once-per-task\|four clearing events" docs/dod.md README.md
+grep -n "terminal\|once-per-task\|four clearing events" docs/dod.md README.md
 awk '/service.Run\(/,/\)/' main.go
 ```
 
