@@ -6,7 +6,7 @@ branch: dark-factory/spec-007
 
 ## Summary
 
-- The emission claim (`InFlightTarget` / `InFlightSince`, spec 005) stops suppressing only on four events, and **none of them is "the emission's task ended without converging the repo"**. A task that ends `aborted` or `completed` leaves a live claim behind, and the claim then suppresses every re-emit for `InFlightTTL` (14 days).
+- The emission claim (`InFlightTarget` / `InFlightSince`, spec 005) stops suppressing only on four events, and **none of them is "the emission's task can no longer progress"**. A task that reaches a terminal status, or is parked at `phase: human_review` where no Config dispatches it, leaves a live claim behind — and the claim then suppresses every re-emit for `InFlightTTL` (14 days).
 - Measured 2026-11-12 on prod (`github-update-go-watcher-0`, ns `agent`): **all 42 repos behind `go 1.27.4` were skipped `reason=emission_in_flight`, and that set is exactly the behind-set** in both directions. `bborbe/auth-http-proxy` (newest record `status: completed`, earlier record `aborted`) and `bborbe/obsidian-redirector` (`status: completed`) both still carry live claims, which proves the claim is cursor-side and outlives the record.
 - Fix: the watcher subscribes to the task lifecycle event topic (the same stream `github-pr-watcher` already consumes) and ends a claim whose emitted task reached a terminal status, once, dropping the dedup keys so the unchanged-HEAD gate cannot re-suppress the re-emit.
 
@@ -20,7 +20,11 @@ branch: dark-factory/spec-007
 | 2 | `InFlightTTL` (336h) elapsed | yes | **Yes, in 14 days** — the only signal the case has |
 | 3 | a new stable release moves `LatestGo`, so `InFlightTarget != target` | no — the stale claim stays on disk | **Only if a new Go release lands** |
 | 4 | an open `fix/update-go-*` PR is observed | yes | **No** — a failed emission opens no PR |
-| **5** | **the emitted task reached a terminal status** | **— absent —** | **this is the defect** |
+| **5** | **the emitted task can no longer progress** | **— absent —** | **this is the defect** |
+
+"Can no longer progress" is a **dispatchability** question, not a status string. A record is progressing only if a Config will still pick it up; two populations cannot: a terminal status (`completed`, `aborted`), and `phase: human_review`, which no Config dispatches and which a record cannot leave on its own. Measured 2026-11-12 in `private-agent/tasks/`: **36 records at `status: in_progress` + `phase: human_review`**, plus 3 at `status: hold` + `human_review` — 39 non-terminal, parked, and invisible to every existing clearing path.
+
+The genuinely in-flight case is protected by ordering, not by a status test: `gateRepo` runs **before** `emissionInFlight`, so a `human_review` row whose update PR is open is already skipped and its claim already cleared by the PR gate. What reaches the new condition is a parked row with **no** PR — the dead case.
 
 The TTL's own comment (`:250-257`) calls it "the backstop for an emission claim whose task never opened a pull request" — which is exactly the broken case, and it is the case's only signal.
 
@@ -49,12 +53,12 @@ The same shape reproduced at fleet scale on 2026-11-12: 42 repos skipped, every 
 
 ## Goal
 
-A repo whose emission task reached a terminal status without converging is re-emittable on the next watcher cycle, while duplicate suppression for a genuinely live emission is unchanged — including the two negative controls spec 005 established (a GitHub error never clears; a forced cycle never bypasses).
+A repo whose emission task can no longer progress — terminal, or parked where nothing dispatches it — is re-emittable on the next watcher cycle, while duplicate suppression for a genuinely live emission is unchanged, including the two negative controls spec 005 established (a GitHub error never clears; a forced cycle never bypasses).
 
 ## Non-goals
 
 - **`InFlightTTL` is not shortened.** It stays the 336h backstop for a claim whose task is still running (or whose terminal event was missed). This adds the missing signal; it does not retune the fallback.
-- **`phase: human_review` with `status: in_progress` does not end a claim.** The terminal set is `status ∈ {completed, aborted}` only. `human_review` is a phase, not a terminal status; ending a claim on it would re-create the duplicate storm spec 005 exists to prevent. The `human_review` dead end is a separate defect.
+- **`phase: human_review` DOES end a claim, and that is deliberate.** A record parked there is owned by nobody ([[A github-update-go Record Routed to human_review Is Owned by Nobody]] closed, and 36 records are still parked), so treating it as live is what freezes the pipeline. It is not "terminal" in the state-machine sense — the distinction this spec draws is **dispatchability**, and the open-PR gate above it keeps a genuinely in-flight review suppressing.
 - **The open-PR gate, the `sha_unchanged` two-key rule, the task identity seed and the consent filters are unchanged.**
 - **No vault read, no task-store query, no new chart value, no new PVC.**
 - **The controller-side supersede refinement and the repo-trigger's identifier seed are untouched.**
@@ -69,7 +73,7 @@ A repo whose emission task reached a terminal status without converging is re-em
 
    **Offset state is in-process, so a restart replays the topic from its oldest offset.** That is the `github-pr-watcher` precedent, and here the replay is a feature rather than a cost: it rebuilds the terminal set from history, so the first deploy ends the pre-existing frozen claims without an operator sweep. The prompt carries the concrete constructor wiring; this spec fixes only the behaviour.
 
-2. **The handler records terminal task identifiers.** The event payload decodes to `agentlib.Task`; the task identifier is the message key. An empty payload is a delete event and is ignored. A non-terminal `Frontmatter.Status()` is ignored. Terminal is `status == completed || status == aborted` — the same two-value set `github-pr-watcher/pkg/retry_guard_consumer.go:35-37` uses.
+2. **The handler records identifiers whose task can no longer progress.** The event payload decodes to `agentlib.Task`; the task identifier is the message key. An empty payload is a delete event and is ignored. **Non-progressing** is `status ∈ {completed, aborted}` **or** `phase == human_review` — the two populations no Config will dispatch. `Frontmatter.Phase()` returns a pointer, so an absent phase is neither terminal nor parked and is ignored. Every other status (`in_progress`, `next`, `backlog`, `hold` at a dispatchable phase) is ignored: a queued or running task must keep its claim.
 
 3. **A terminal identifier is stored as observed-terminal, with a consumed flag.** The store answers two questions: *has this identifier been observed terminal*, and *may this cycle consume the entitlement to end a claim for it*. Both are local reads — no clock, no GitHub call, no cursor access. No sighting counter: the second question is a boolean, and nothing reads a count.
 
@@ -83,7 +87,7 @@ A repo whose emission task reached a terminal status without converging is re-em
 
 7. **Suppression is otherwise unchanged.** A live claim with no terminal observation, no convergence, no open PR and no TTL expiry still suppresses with `reason=emission_in_flight`; a different target version still stops matching; a GitHub error still never clears; a forced cycle still does not bypass; a store error leaves the claim intact.
 
-8. **Documentation in the same change.** `docs/dod.md`'s in-flight paragraph names the fifth condition and its once-per-task bound, and states that the terminal set is rebuilt from the event topic on restart. `README.md`'s `emission_in_flight` row (`:82`) changes "the three clearing events" to four and names the new one. `specs/in-progress/005-…md` Desired Behavior 3 (`:62-65`) lists five conditions with a pointer to this spec, and its Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the terminal event ends the claim on the next cycle; the TTL remains the backstop".
+8. **Documentation in the same change.** `docs/dod.md`'s in-flight paragraph names the fifth condition, defines it as *dispatchability* (terminal **or** `phase: human_review`), and states the once-per-task bound and that the set is rebuilt from the event topic on restart. `README.md`'s `emission_in_flight` row (`:82`) changes "the three clearing events" to four and names the new one. `specs/in-progress/005-…md` Desired Behavior 3 (`:62-65`) lists five conditions with a pointer to this spec, and its Failure Modes row at `:84` changes its recovery from "TTL expires after 336h" to "the non-progressing event ends the claim on the next cycle; the TTL remains the backstop".
 
 ## Constraints
 
@@ -93,7 +97,7 @@ A repo whose emission task reached a terminal status without converging is re-em
 - Do not change `InFlightTTL`, `DeriveTaskID`, `openUpdatePRGate`'s semantics, or `SHAUnchangedFilter`'s rule. The dedup-key drop happens in the cursor, not in the filter.
 - The cursor file must stay readable by an older binary — this change adds no field.
 - The consumer must never return on a recoverable error.
-- `phase: human_review` with `status: in_progress` is not terminal.
+- The non-progressing set is exactly two populations: a terminal status, and `phase: human_review`. Do not widen it to `hold`, `next` or `backlog` — those are waits the claim exists to cover.
 - Ending a failed emission and clearing on convergence stay separate code paths: they differ in whether the dedup keys survive, and collapsing them would either lose the re-emit or clear dedup state on convergence.
 
 ## Failure Modes
@@ -106,7 +110,9 @@ A repo whose emission task reached a terminal status without converging is re-em
 | Consumer restarts / pod restarts | Replay from the oldest offset rebuilds the terminal set and re-arms every consumed entitlement; offsets are in-process by design | Self-healing — the replay also ends claims left by pre-fix failures. Cost: a deterministically failing repo re-emits once per restart (bounded, visible) |
 | Event topic unavailable | The consumer logs and retries; the poll loop keeps running with the TTL as its only backstop | Fix the broker; no state is lost because replay is from the oldest offset |
 | Malformed event payload | The handler is wrapped in a skip-errors sampler; the consumer keeps consuming | Nothing — one skipped event cannot wedge the loop |
-| Non-terminal status event (`in_progress`, `next`, `backlog`, `hold`) | Ignored | — |
+| Non-progressing event (`completed`, `aborted`, or `phase: human_review`) | Recorded; the next cycle may end the claim once | — |
+| Status event at a dispatchable phase (`in_progress`, `next`, `backlog`, `hold` at `planning`/`execution`/`ai_review`) | Ignored — the claim must survive a queued or running task | — |
+| A `human_review` row whose update PR is open | The PR gate runs first: repo skipped `reason=open_update_pr`, claim cleared there; the new condition never sees it | — |
 | Delete event (empty payload) | Ignored explicitly | — |
 | A `- reemit` hand-authored task ends terminal | Its identifier is not a `DeriveTaskID` seed, so it can never match a claim | — |
 | Forced cycle with a live claim and no terminal observation | Still suppressed — the new condition ends a claim only on evidence, and a forced cycle supplies none | — |
@@ -115,16 +121,18 @@ A repo whose emission task reached a terminal status without converging is re-em
 
 ## Acceptance Criteria
 
-- [ ] **A terminal task ends the claim and the repo is emitted.** Fixture: cursor with `in_flight_target: "1.27.4"`, `in_flight_since: <now-1h>`, `last_seen_head_sha: <sha>`, `last_seen_go_version: "1.27.4"`; `go.mod` at `1.27.1`; no open PR; the terminal store reports `DeriveTaskID(owner, repo, "1.27.4", <sha>)` terminal with the entitlement available. → exactly **1** `PublishCreate` for that repo, `filter_skipped_total{reason="emission_in_flight"}` stays **0**, and the decoded cursor has an empty `InFlightTarget` **and** an empty `LastSeenHeadSHA`. — evidence: publisher spy call count + metric counter + decoded-struct assertions.
+- [ ] **A non-progressing task ends the claim and the repo is emitted.** Fixture: cursor with `in_flight_target: "1.27.4"`, `in_flight_since: <now-1h>`, `last_seen_head_sha: <sha>`, `last_seen_go_version: "1.27.4"`; `go.mod` at `1.27.1`; no open PR; the store reports `DeriveTaskID(owner, repo, "1.27.4", <sha>)` non-progressing with the entitlement available. → exactly **1** `PublishCreate` for that repo, `filter_skipped_total{reason="emission_in_flight"}` stays **0**, and the decoded cursor has an empty `InFlightTarget` **and** an empty `LastSeenHeadSHA`. — evidence: publisher spy call count + metric counter + decoded-struct assertions.
+- [ ] **A `human_review`-parked task ends the claim too.** Same fixture, but the observed task is `status: in_progress` + `phase: human_review`, no open PR → exactly **1** `PublishCreate`, counter **0**, `InFlightTarget` empty. — evidence: spy count + metric counter + decoded struct. This is the 36-record population the terminal-only predicate would miss.
+- [ ] **A queued or running task does not.** Same fixture, the observed task is `status: in_progress` + `phase: execution` (or `next` / `backlog`) → **0** `PublishCreate`, `{reason="emission_in_flight"}` increments, `InFlightTarget` intact. — evidence: spy count + metric counter + decoded struct. Without this the widening turns the claim off.
 - [ ] **The fix is failing-first.** The same fixture against pre-fix code (no terminal store wired) yields **0** `PublishCreate` and `filter_skipped_total{reason="emission_in_flight"}` = **1**. — evidence: the RED commit's own assertion output, and `git log --diff-filter=A -- pkg/<the new test file>` showing the RED assertion predates the fix commit.
 - [ ] **The consumer is actually composed, not merely declared.** The `NewTerminalClaimsConsumer(...)` call appears **inside the argument list of the `service.Run(...)` call** in `main.go` (checked over the call block, not by a file-wide count), and `main_test.go` asserts the third `run.Func` argument is that consumer — identity, not a count. — evidence: the `awk`-extracted `service.Run` call block quoted, plus the `main_test.go` assertion.
 - [ ] **A second sighting does not end the claim.** Same fixture, the entitlement already consumed → **0** `PublishCreate`, `{reason="emission_in_flight"}` increments, and the decoded cursor still carries `InFlightTarget`. — evidence: spy count + metric counter + decoded struct.
-- [ ] **A live claim with no terminal observation still suppresses.** Claim live, repo behind, store reports nothing terminal → **0** `PublishCreate`, `{reason="emission_in_flight"}` increments. — evidence: spy count + metric counter.
+- [ ] **A live claim with no non-progressing observation still suppresses.** Claim live, repo behind, store reports nothing non-progressing → **0** `PublishCreate`, `{reason="emission_in_flight"}` increments. — evidence: spy count + metric counter.
 - [ ] **The four existing conditions still work.** Convergence (`go.mod` at `1.27.4`), an observed open `fix/update-go-*` PR, TTL expiry (`in_flight_since = <now-337h>` with a HEAD differing from `last_seen_head_sha`), and a different target version each still stop suppression, with the pre-existing assertions unchanged. — evidence: the existing `emissionInFlight` / `gateRepo` suite green, plus one decoded-struct assertion per condition.
 - [ ] **Negative control — a GitHub error still does not clear.** `HasOpenUpdatePR` stubbed to a non-fatal error → repo dropped, `InFlightTarget` unchanged, 0 `PublishCreate`. — evidence: decoded struct + spy count.
 - [ ] **Negative control — a forced cycle does not bypass.** Live claim, `force=true`, no terminal observation → 0 `PublishCreate` and `{reason="emission_in_flight"}` increments. — evidence: spy count + metric counter.
 - [ ] **A store error does not clear.** The store returns an error → the claim is unchanged and the repo is suppressed. — evidence: decoded struct + spy count 0.
-- [ ] **The consumer records only terminal statuses.** Handler fed four events — `completed`, `aborted`, `in_progress`, and an empty-payload delete — leaves the store reporting terminal for the first two and not for the last two, and the entitlement available exactly once for a single-observation identifier. — evidence: store read after each event.
+- [ ] **The consumer records only non-progressing tasks.** Handler fed six events — `completed`, `aborted`, `in_progress`+`human_review`, `in_progress`+`execution`, `next`+`planning`, and an empty-payload delete — records the first three and ignores the last three, and the entitlement is available exactly once for a single-observation identifier. — evidence: store read after each event.
 - [ ] **The consumer never returns on a recoverable error.** A handler error is skipped and the loop continues until `ctx` is cancelled. — evidence: the consumer test cancels the context and asserts a `nil` return with a non-zero handled-message count.
 - [ ] **Docs updated in the same change.** `docs/dod.md` names the fifth condition and the once-per-task bound (`grep -c 'terminal' docs/dod.md` is ≥ 1 **and** `grep -c 'once-per-task' docs/dod.md` is ≥ 1); `README.md`'s row no longer says three (`grep -c 'four clearing events' README.md` is ≥ 1); spec 005 lists five (`grep -c 'terminal status' specs/in-progress/005-*.md` is ≥ 1). — evidence: the four counts quoted. Each count is 0 today, so a stray mention of the word "terminal" cannot satisfy it.
 
