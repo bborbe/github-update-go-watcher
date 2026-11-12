@@ -16,6 +16,7 @@ run:
 	-kafka-brokers="${KAFKA_BROKERS}" \
 	-stage="${STAGE}" \
 	-owner="${OWNER}" \
+	-target-vault="${TARGET_VAULT}" \
 	-repo-allowlist="${REPO_ALLOWLIST}" \
 	-cursor-path="data/cursor.json" \
 	-poll-interval="10m" \
