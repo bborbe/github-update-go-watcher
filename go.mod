@@ -1,14 +1,16 @@
 module github.com/bborbe/github-update-go-watcher
 
-go 1.27.3
+go 1.27.4
 
 require (
+	github.com/IBM/sarama v1.61.1
 	github.com/bborbe/agent v0.138.0
 	github.com/bborbe/collection v1.21.6
 	github.com/bborbe/cqrs v0.6.15
 	github.com/bborbe/errors v1.6.6
 	github.com/bborbe/http v1.26.32
 	github.com/bborbe/kafka v1.29.11
+	github.com/bborbe/kv v1.21.28
 	github.com/bborbe/log v1.7.6
 	github.com/bborbe/maintainer v0.51.0
 	github.com/bborbe/metrics v0.6.9
@@ -17,6 +19,7 @@ require (
 	github.com/bborbe/service v1.11.2
 	github.com/bborbe/time v1.27.25
 	github.com/bborbe/validation v1.5.8
+	github.com/bborbe/vault-cli v0.186.1
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/golang/glog v1.2.5
 	github.com/google/go-github/v84 v84.0.0
@@ -29,16 +32,13 @@ require (
 )
 
 require (
-	github.com/IBM/sarama v1.61.1 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/a2aproject/a2a-go/v2 v2.7.0 // indirect
 	github.com/bborbe/argument/v2 v2.13.9 // indirect
 	github.com/bborbe/k8s v1.14.31 // indirect
-	github.com/bborbe/kv v1.21.28 // indirect
 	github.com/bborbe/math v1.4.18 // indirect
 	github.com/bborbe/parse v1.12.5 // indirect
 	github.com/bborbe/strimzi v1.8.23 // indirect
-	github.com/bborbe/vault-cli v0.186.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
