@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: Stamp `target_vault` on every emitted create-task and complete-task command. Both senders were built with an empty default vault and the task frontmatter never carried the field, so every command went out with an empty `target_vault` and the controller refused it at validation (`invalid target_vault … the producer must stamp the owning vault`) instead of falling back to its legacy default. The publish succeeded and nothing was written — measured on prod 2026-11-12: 23 publishes, 0 task files, invisible on the watcher side. `TARGET_VAULT` is now required, so an unset vault fails at startup rather than silently disabling the pipeline.
+
 ## v0.9.1
 
 - fix: Clear the emission claim when the emitted task can no longer progress. The claim's four clearing paths all missed a task that reached a terminal status, or was parked at `phase: human_review` where no Config dispatches it, so a failed emission suppressed its repo for the whole 14-day `InFlightTTL`. The watcher now consumes the task lifecycle event topic (the stream `github-pr-watcher` already consumes) and ends the claim once per emitted task, dropping the `sha_unchanged` dedup keys so the re-emit is not suppressed by the unchanged HEAD. Measured 2026-11-12: 42 of 98 repos behind go 1.27.4 were skipped `reason=emission_in_flight`, and 39 records sat non-terminal at `human_review`.

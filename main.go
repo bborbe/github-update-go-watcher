@@ -39,13 +39,14 @@ type application struct {
 	SentryDSN   string `required:"false" arg:"sentry-dsn"   env:"SENTRY_DSN"   usage:"SentryDSN"    display:"length"`
 	SentryProxy string `required:"false" arg:"sentry-proxy" env:"SENTRY_PROXY" usage:"Sentry Proxy"`
 
-	Listen        string `required:"false" arg:"listen"         env:"LISTEN"         usage:"HTTP listen address"                                                                             default:":9090"`
+	Listen        string `required:"false" arg:"listen"         env:"LISTEN"         usage:"HTTP listen address"                                                                                            default:":9090"`
 	Stage         string `required:"true"  arg:"stage"          env:"STAGE"          usage:"Deployment stage (dev|prod), stamped on every emitted task"`
 	UpdateScope   string `required:"false" arg:"update-scope"   env:"UPDATE_SCOPE"   usage:"Fleet-wide update scope stamped on every emitted task (golang|deps); empty = both"`
+	TargetVault   string `required:"true"  arg:"target-vault"   env:"TARGET_VAULT"   usage:"Vault slug stamped on every emitted task; the controller refuses an empty target_vault instead of falling back"`
 	Owner         string `required:"true"  arg:"owner"          env:"OWNER"          usage:"GitHub owner / org to scan (e.g. bborbe)"`
 	RepoAllowlist string `required:"false" arg:"repo-allowlist" env:"REPO_ALLOWLIST" usage:"Comma-separated host-qualified repo allowlist (host/owner/repo); empty = allow-all within OWNER"`
-	PollInterval  string `required:"false" arg:"poll-interval"  env:"POLL_INTERVAL"  usage:"Poll interval (Go duration)"                                                                     default:"10m"`
-	CursorPath    string `required:"false" arg:"cursor-path"    env:"CURSOR_PATH"    usage:"Persisted-memory path (mount a PVC)"                                                             default:"/data/cursor.json"`
+	PollInterval  string `required:"false" arg:"poll-interval"  env:"POLL_INTERVAL"  usage:"Poll interval (Go duration)"                                                                                    default:"10m"`
+	CursorPath    string `required:"false" arg:"cursor-path"    env:"CURSOR_PATH"    usage:"Persisted-memory path (mount a PVC)"                                                                            default:"/data/cursor.json"`
 	KafkaBrokers  string `required:"true"  arg:"kafka-brokers"  env:"KAFKA_BROKERS"  usage:"Comma separated list of Kafka brokers"`
 
 	TopicPrefix base.TopicPrefix `required:"false" arg:"topic-prefix" env:"TOPIC_PREFIX" usage:"Kafka topic prefix for CQRS topic construction"`
@@ -104,8 +105,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	}()
 
 	metrics := pkg.NewMetrics(nil)
-	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix)
-	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix)
+	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix, a.TargetVault)
+	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix, a.TargetVault)
 	currentDateTime := libtime.NewCurrentDateTime()
 	// In-process kv DB: the offset store and the terminal-claims store. A
 	// restart replays the event topic from its oldest offset, which is safe (the
