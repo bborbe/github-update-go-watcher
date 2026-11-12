@@ -1,10 +1,16 @@
 ---
-status: approved
+status: completed
 spec: [007-bug-emission-claim-survives-a-failed-emission]
 summary: Clears the emission claim when the emitted task can no longer progress — terminal, or parked at human_review — via a task-lifecycle consumer, so a failed emission no longer suppresses a re-emit for 14 days
 created: "2026-11-12T18:48:17Z"
 queued: "2026-11-12T18:48:17Z"
 ---
+
+<!-- Implemented directly on branch fix/emission-claim-terminal-clear: the
+     dark-factory container could not reach the model router (127.0.0.1:8788 is
+     not the host inside the container, host.docker.internal does not resolve),
+     so every daemon start failed its claude healthcheck probe. Kept as the
+     design record for commit 33e013c. -->
 
 <summary>
 - A repo whose update task can no longer progress is re-emitted on the next watcher cycle instead of after the fourteen-day backstop.
