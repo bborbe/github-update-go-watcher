@@ -26,14 +26,21 @@ type TerminalClaims interface {
 	// Idempotent: observing the same identifier twice changes nothing, and it
 	// never re-arms a consumed entitlement.
 	Observe(ctx context.Context, taskID string) error
-	// ClaimClearAllowed reports whether taskID has been observed non-progressing
-	// and the entitlement to end a claim for it has not yet been consumed. It
-	// consumes the entitlement so a second cycle does not end the claim again.
-	//
-	// The consumption is what bounds the fix: without it a repo whose task
+	// Clearable reports whether taskID has been observed non-progressing and its
+	// entitlement has not yet been consumed. It does NOT consume — the caller
+	// consumes only once its own state is durable (see Consume).
+	Clearable(ctx context.Context, taskID string) (bool, error)
+	// Consume spends the entitlement for taskID, so a later cycle cannot end the
+	// claim again. It is what bounds the fix: without it a repo whose task
 	// deterministically stops progressing re-emits every poll interval (10m)
 	// instead of every InFlightTTL (14 days).
-	ClaimClearAllowed(ctx context.Context, taskID string) (bool, error)
+	//
+	// It is deliberately separate from Clearable. Consuming at read time would
+	// spend the entitlement before the poll cycle saves its cursor, so a
+	// rate-limited abort later in the same cycle would lose the cursor write
+	// while keeping the consumption — and the repo would stay suppressed until
+	// the next pod restart.
+	Consume(ctx context.Context, taskID string) error
 
 	// ObserveTx is Observe inside a caller-supplied transaction.
 	//
@@ -42,9 +49,6 @@ type TerminalClaims interface {
 	// called Observe would open a second Update on the same lock and deadlock on
 	// the first event. The consumer therefore passes the tx it was given.
 	ObserveTx(ctx context.Context, tx libkv.Tx, taskID string) error
-	// ClaimClearAllowedTx is ClaimClearAllowed inside a caller-supplied
-	// transaction, for the same reason as ObserveTx.
-	ClaimClearAllowedTx(ctx context.Context, tx libkv.Tx, taskID string) (bool, error)
 }
 
 // terminalClaimsBucket holds one key per observed identifier, plus a
@@ -75,41 +79,41 @@ func (c *terminalClaims) Observe(ctx context.Context, taskID string) error {
 	})
 }
 
-func (c *terminalClaims) ClaimClearAllowed(
+func (c *terminalClaims) Clearable(
 	ctx context.Context,
 	taskID string,
 ) (bool, error) {
-	allowed := false
-	err := c.db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
+	clearable := false
+	err := c.db.View(ctx, func(ctx context.Context, tx libkv.Tx) error {
 		var err error
-		allowed, err = c.ClaimClearAllowedTx(ctx, tx, taskID)
+		clearable, err = c.clearableTx(ctx, tx, taskID)
 		return err
 	})
 	if err != nil {
 		return false, err
 	}
-	return allowed, nil
+	return clearable, nil
 }
 
-func (c *terminalClaims) ObserveTx(
-	ctx context.Context,
-	tx libkv.Tx,
-	taskID string,
-) error {
-	bucket, err := tx.CreateBucketIfNotExists(
-		ctx,
-		libkv.NewBucketName(terminalClaimsBucket),
-	)
-	if err != nil {
-		return errors.Wrapf(ctx, err, "create bucket %s", terminalClaimsBucket)
-	}
-	if err := bucket.Put(ctx, []byte(taskID), terminalClaimMarker); err != nil {
-		return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
-	}
-	return nil
+func (c *terminalClaims) Consume(ctx context.Context, taskID string) error {
+	return c.db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
+		bucket, err := tx.Bucket(ctx, libkv.NewBucketName(terminalClaimsBucket))
+		if err != nil {
+			if stderrors.Is(err, libkv.ErrBucketNotFound) {
+				return nil
+			}
+			return errors.Wrapf(ctx, err, "open bucket %s", terminalClaimsBucket)
+		}
+		clearedKey := taskID + ":cleared"
+		if err := bucket.Put(ctx, []byte(clearedKey), terminalClaimMarker); err != nil {
+			return errors.Wrapf(ctx, err, "consume entitlement taskID=%s", taskID)
+		}
+		return nil
+	})
 }
 
-func (c *terminalClaims) ClaimClearAllowedTx(
+// clearableTx is Clearable's body, shared with the read-only transaction above.
+func (c *terminalClaims) clearableTx(
 	ctx context.Context,
 	tx libkv.Tx,
 	taskID string,
@@ -130,16 +134,27 @@ func (c *terminalClaims) ClaimClearAllowedTx(
 	if !observed.Exists() {
 		return false, nil
 	}
-	clearedKey := taskID + ":cleared"
-	cleared, err := bucket.Get(ctx, []byte(clearedKey))
+	cleared, err := bucket.Get(ctx, []byte(taskID+":cleared"))
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "read taskID=%s marker", taskID)
 	}
-	if cleared.Exists() {
-		return false, nil
+	return !cleared.Exists(), nil
+}
+
+func (c *terminalClaims) ObserveTx(
+	ctx context.Context,
+	tx libkv.Tx,
+	taskID string,
+) error {
+	bucket, err := tx.CreateBucketIfNotExists(
+		ctx,
+		libkv.NewBucketName(terminalClaimsBucket),
+	)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "create bucket %s", terminalClaimsBucket)
 	}
-	if err := bucket.Put(ctx, []byte(clearedKey), terminalClaimMarker); err != nil {
-		return false, errors.Wrapf(ctx, err, "consume entitlement taskID=%s", taskID)
+	if err := bucket.Put(ctx, []byte(taskID), terminalClaimMarker); err != nil {
+		return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
 	}
-	return true, nil
+	return nil
 }

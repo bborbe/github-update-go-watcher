@@ -80,9 +80,14 @@ type watcher struct {
 	taskCreationFilter    filter.TaskCreationFilter
 	currentDateTimeGetter libtime.CurrentDateTimeGetter
 	terminalClaims        TerminalClaims
+	// pendingTerminalConsume holds the task identifiers this cycle cleared a
+	// claim for. Their entitlements are spent only after the cursor save
+	// succeeds — see consumePending.
+	pendingTerminalConsume []string
 }
 
 func (w *watcher) Poll(ctx context.Context, force bool) error {
+	w.pendingTerminalConsume = nil
 	cursorState, err := LoadCursor(ctx, w.cursorPath)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "load cursor path=%s", w.cursorPath)
@@ -141,12 +146,16 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 		// re-published next cycle after a lost in-memory state.
 		if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
 			glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
+		} else {
+			w.consumePending(ctx)
 		}
 		return nil
 	}
 
 	if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
 		glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
+	} else {
+		w.consumePending(ctx)
 	}
 
 	w.metrics.IncPollCycle("success")
@@ -360,7 +369,7 @@ func (w *watcher) terminalEmission(
 		state.InFlightTarget,
 		state.LastSeenHeadSHA,
 	).String()
-	allowed, err := w.terminalClaims.ClaimClearAllowed(ctx, taskID)
+	clearable, err := w.terminalClaims.Clearable(ctx, taskID)
 	if err != nil {
 		glog.Warningf(
 			"emission claim: read terminal state failed repo=%s taskID=%s err=%v",
@@ -370,7 +379,31 @@ func (w *watcher) terminalEmission(
 		)
 		return false
 	}
-	return allowed
+	if clearable {
+		// Recorded, not spent: the entitlement is consumed only after the cursor
+		// save succeeds, so a rate-limited abort later in this cycle cannot lose
+		// the cursor write while keeping the consumption.
+		w.pendingTerminalConsume = append(w.pendingTerminalConsume, taskID)
+	}
+	return clearable
+}
+
+// consumePending spends the entitlements for the claims this cycle cleared.
+// Called only after SaveCursor succeeded. A failure is logged and the
+// entitlement stays unspent, which fails open — the next cycle clears again and
+// the duplicate emission is absorbed downstream by the deterministic task
+// identifier.
+func (w *watcher) consumePending(ctx context.Context) {
+	for _, taskID := range w.pendingTerminalConsume {
+		if err := w.terminalClaims.Consume(ctx, taskID); err != nil {
+			glog.Warningf(
+				"emission claim: consume entitlement failed taskID=%s err=%v",
+				taskID,
+				err,
+			)
+		}
+	}
+	w.pendingTerminalConsume = nil
 }
 
 // inFlightExpired reports whether the claim is past InFlightTTL. An unparsable

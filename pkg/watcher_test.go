@@ -48,7 +48,7 @@ var _ = Describe("watcher", func() {
 		allowlist = []string{"github.com/bborbe/disk-status"}
 		currentDateTime = libtime.NewCurrentDateTime()
 		terminalClaims = &mocks.TerminalClaims{}
-		terminalClaims.ClaimClearAllowedReturns(false, nil)
+		terminalClaims.ClearableReturns(false, nil)
 	})
 
 	buildWatcher := func() {
@@ -1066,7 +1066,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		publisher = &mocks.TaskPublisher{}
 		completeSender = new(taskmocks.TaskCompleteCommandSender)
 		terminalClaims = &mocks.TerminalClaims{}
-		terminalClaims.ClaimClearAllowedReturns(false, nil)
+		terminalClaims.ClearableReturns(false, nil)
 
 		ghClient.ListReposReturns([]pkg.Repo{
 			{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
@@ -1153,7 +1153,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 	// InFlightTTL and the repo is frozen.
 	It("a non-progressing emission task ends the claim and the repo is emitted", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
-		terminalClaims.ClaimClearAllowedReturns(true, nil)
+		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
@@ -1172,12 +1172,12 @@ var _ = Describe("emission claim (spec 005)", func() {
 
 	It("derives the claim's task identifier from the cursor, not a stored field", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
-		terminalClaims.ClaimClearAllowedReturns(true, nil)
+		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
-		Expect(terminalClaims.ClaimClearAllowedCallCount()).To(Equal(1))
-		_, taskID := terminalClaims.ClaimClearAllowedArgsForCall(0)
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
+		_, taskID := terminalClaims.ClearableArgsForCall(0)
 		Expect(taskID).To(Equal(
 			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
 		))
@@ -1185,7 +1185,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 
 	It("a consumed entitlement keeps the claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
-		terminalClaims.ClaimClearAllowedReturns(false, nil)
+		terminalClaims.ClearableReturns(false, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
@@ -1196,7 +1196,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 
 	It("a store error does not end the claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
-		terminalClaims.ClaimClearAllowedReturns(false, errors.New("store unavailable"))
+		terminalClaims.ClearableReturns(false, errors.New("store unavailable"))
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
@@ -1205,13 +1205,49 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
 	})
 
+	// The entitlement must be spent only after the cursor save succeeds. If it
+	// were consumed at read time, a rate-limited abort later in the same cycle
+	// would lose the cursor write but keep the consumption — and the repo would
+	// stay suppressed until the next pod restart.
+	It("does not spend the entitlement when the cycle aborts before saving", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+		ghClient.ListReposReturns([]pkg.Repo{
+			{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+			{Owner: "bborbe", Name: "second", DefaultBranch: "main"},
+		}, nil)
+		// First repo passes the PR gate and clears its claim; the second repo is
+		// rate limited, which aborts the cycle before SaveCursor runs.
+		ghClient.HasOpenUpdatePRReturnsOnCall(0, false, nil)
+		ghClient.HasOpenUpdatePRReturnsOnCall(1, false, pkg.ErrRateLimited)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
+			"the cursor was never saved, so the entitlement must not be spent")
+	})
+
+	It("spends the entitlement once the cursor is saved", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
+		_, taskID := terminalClaims.ConsumeArgsForCall(0)
+		Expect(taskID).To(Equal(
+			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
+		))
+	})
+
 	It("a converged repo never consults the terminal store", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
-		Expect(terminalClaims.ClaimClearAllowedCallCount()).To(Equal(0))
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(0))
 	})
 
 	It("convergence clears the claim", func() {

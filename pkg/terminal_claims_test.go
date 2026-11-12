@@ -25,47 +25,53 @@ var _ = Describe("TerminalClaims", func() {
 	})
 
 	It("reports nothing for an identifier never observed", func() {
-		allowed, err := store.ClaimClearAllowed(ctx, "task-1")
+		allowed, err := store.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(allowed).To(BeFalse())
 	})
 
-	It("allows the clear exactly once per identifier", func() {
+	It("is clearable until the entitlement is consumed", func() {
 		Expect(store.Observe(ctx, "task-1")).To(Succeed())
 
-		first, err := store.ClaimClearAllowed(ctx, "task-1")
+		first, err := store.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(first).To(BeTrue())
 
-		second, err := store.ClaimClearAllowed(ctx, "task-1")
+		// Reading alone does not spend it — the caller consumes only once its own
+		// state is durable.
+		again, err := store.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(second).To(BeFalse(),
+		Expect(again).To(BeTrue())
+
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+		spent, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spent).To(BeFalse(),
 			"the entitlement is consumed, so a second cycle cannot end the claim again")
 	})
 
 	It("does not re-arm the entitlement when observed again", func() {
 		Expect(store.Observe(ctx, "task-1")).To(Succeed())
-		allowed, err := store.ClaimClearAllowed(ctx, "task-1")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(allowed).To(BeTrue())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
 
 		// A second terminal event for the same identifier — the re-emitted task
 		// stopping again at the same HEAD — must not re-open the entitlement.
 		Expect(store.Observe(ctx, "task-1")).To(Succeed())
-		allowed, err = store.ClaimClearAllowed(ctx, "task-1")
+		clearable, err := store.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(allowed).To(BeFalse())
+		Expect(clearable).To(BeFalse())
 	})
 
 	It("tracks identifiers independently", func() {
 		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
 
-		allowed, err := store.ClaimClearAllowed(ctx, "task-2")
+		allowed, err := store.Clearable(ctx, "task-2")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(allowed).To(BeFalse())
 
-		allowed, err = store.ClaimClearAllowed(ctx, "task-1")
+		allowed, err = store.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(allowed).To(BeTrue())
+		Expect(allowed).To(BeFalse())
 	})
 })

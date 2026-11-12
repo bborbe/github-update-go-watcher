@@ -54,7 +54,7 @@ var _ = Describe("terminal claims consumer", func() {
 	}
 
 	allowed := func(taskID string) bool {
-		ok, err := store.ClaimClearAllowed(ctx, taskID)
+		ok, err := store.Clearable(ctx, taskID)
 		Expect(err).NotTo(HaveOccurred())
 		return ok
 	}
@@ -117,9 +117,9 @@ var _ = Describe("terminal claims consumer", func() {
 			Fail("handler deadlocked inside the batch transaction")
 		}
 
-		allowed, err := claimStore.ClaimClearAllowed(ctx, "task-1")
+		clearable, err := claimStore.Clearable(ctx, "task-1")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(allowed).To(BeTrue())
+		Expect(clearable).To(BeTrue())
 	})
 
 	It("derives the topic from the prefix", func() {
