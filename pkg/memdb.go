@@ -6,12 +6,17 @@ package pkg
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"sync"
 
 	libkv "github.com/bborbe/kv"
 )
+
+// errMemDBClosed is returned by a write on a closed DB rather than panicking on
+// the nil bucket map.
+var errMemDBClosed = errors.New("memdb: database is closed")
 
 // NewMemDB returns a session-scoped, in-process libkv.DB implementation. It
 // exists because github.com/bborbe/kv ships no public memory constructor (only
@@ -101,6 +106,9 @@ func (t *memTx) CreateBucket(
 	ctx context.Context,
 	name libkv.BucketName,
 ) (libkv.Bucket, error) {
+	if t.db.buckets == nil {
+		return nil, errMemDBClosed
+	}
 	if _, ok := t.db.buckets[name.String()]; ok {
 		return nil, libkv.ErrBucketAlreadyExists
 	}
@@ -112,6 +120,9 @@ func (t *memTx) CreateBucketIfNotExists(
 	ctx context.Context,
 	name libkv.BucketName,
 ) (libkv.Bucket, error) {
+	if t.db.buckets == nil {
+		return nil, errMemDBClosed
+	}
 	if _, ok := t.db.buckets[name.String()]; !ok {
 		t.db.buckets[name.String()] = make(map[string][]byte)
 	}
@@ -119,6 +130,9 @@ func (t *memTx) CreateBucketIfNotExists(
 }
 
 func (t *memTx) DeleteBucket(ctx context.Context, name libkv.BucketName) error {
+	if t.db.buckets == nil {
+		return errMemDBClosed
+	}
 	delete(t.db.buckets, name.String())
 	return nil
 }
@@ -146,7 +160,10 @@ func (b *memBucket) Get(ctx context.Context, key []byte) (libkv.Item, error) {
 	if !ok {
 		return libkv.NewByteItem(key, nil), nil
 	}
-	return libkv.NewByteItem(key, v), nil
+	// Copy: the map value is live, and a caller holding it could mutate stored
+	// state outside a transaction. Put copies on the way in, so read copies on
+	// the way out.
+	return libkv.NewByteItem(key, append([]byte(nil), v...)), nil
 }
 
 func (b *memBucket) Delete(ctx context.Context, key []byte) error {
@@ -188,7 +205,7 @@ func (i *memIterator) Item() libkv.Item {
 		return libkv.NewByteItem(nil, nil)
 	}
 	key := i.keys[i.index]
-	return libkv.NewByteItem([]byte(key), i.values[key])
+	return libkv.NewByteItem([]byte(key), append([]byte(nil), i.values[key]...))
 }
 
 func (i *memIterator) Next() { i.index++ }

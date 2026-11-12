@@ -71,7 +71,11 @@ func NewTerminalClaimsMessageHandler(claims TerminalClaims) libkafka.MessageHand
 				return nil
 			}
 			taskID := string(msg.Key)
-			if err := claims.Observe(ctx, taskID); err != nil {
+			// ObserveTx, not Observe: this handler already runs inside
+			// db.Update, which holds the database's write lock, and the DB is not
+			// reentrant — opening a second Update here would deadlock on the
+			// first event.
+			if err := claims.ObserveTx(ctx, tx, taskID); err != nil {
 				return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
 			}
 			glog.V(2).Infof("non-progressing task observed taskID=%s", taskID)

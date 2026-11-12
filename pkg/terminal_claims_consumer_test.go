@@ -7,10 +7,13 @@ package pkg_test
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/IBM/sarama"
 	agentlib "github.com/bborbe/agent"
 	base "github.com/bborbe/cqrs/base"
+	libkafka "github.com/bborbe/kafka"
+	libkv "github.com/bborbe/kv"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -31,16 +34,23 @@ func taskEvent(taskID string, frontmatter agentlib.TaskFrontmatter) *sarama.Cons
 var _ = Describe("terminal claims consumer", func() {
 	var (
 		ctx   context.Context
+		db    libkv.DB
 		store pkg.TerminalClaims
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		store = pkg.NewTerminalClaims(pkg.NewMemDB())
+		db = pkg.NewMemDB()
+		store = pkg.NewTerminalClaims(db)
 	})
 
+	// Run the handler inside a real Update, as the batch consumer does — a nil
+	// tx would not exercise the tx-scoped path the consumer actually uses.
 	consume := func(msg *sarama.ConsumerMessage) error {
-		return pkg.NewTerminalClaimsMessageHandler(store).ConsumeMessage(ctx, nil, msg)
+		handler := pkg.NewTerminalClaimsMessageHandler(store)
+		return db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
+			return handler.ConsumeMessage(ctx, tx, msg)
+		})
 	}
 
 	allowed := func(taskID string) bool {
@@ -76,6 +86,40 @@ var _ = Describe("terminal claims consumer", func() {
 			Value: nil,
 		})).To(Succeed())
 		Expect(allowed("task-1")).To(BeFalse())
+	})
+
+	// The consumer wires the handler through NewMessageHandlerBatchTxUpdate,
+	// which opens db.Update and holds the database's write lock. libkv's DB is
+	// not reentrant, so a handler that opened its own Update would deadlock on
+	// the very first event and the watcher would hang with no error.
+	It("does not deadlock inside the batch transaction", func() {
+		db := pkg.NewMemDB()
+		claimStore := pkg.NewTerminalClaims(db)
+		batch := libkafka.NewMessageHandlerBatchTxUpdate(
+			db,
+			libkafka.NewMessageHandlerBatchTx(
+				pkg.NewTerminalClaimsMessageHandler(claimStore),
+			),
+		)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- batch.ConsumeMessages(
+				ctx,
+				[]*sarama.ConsumerMessage{taskEvent("task-1", agentlib.TaskFrontmatter{"status": "aborted"})},
+			)
+		}()
+
+		select {
+		case err := <-done:
+			Expect(err).NotTo(HaveOccurred())
+		case <-time.After(2 * time.Second):
+			Fail("handler deadlocked inside the batch transaction")
+		}
+
+		allowed, err := claimStore.ClaimClearAllowed(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(allowed).To(BeTrue())
 	})
 
 	It("derives the topic from the prefix", func() {

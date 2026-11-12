@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/bborbe/github-update-go-watcher/pkg"
+	"github.com/bborbe/kv"
 )
 
 type TerminalClaims struct {
@@ -23,6 +24,21 @@ type TerminalClaims struct {
 		result1 bool
 		result2 error
 	}
+	ClaimClearAllowedTxStub        func(context.Context, kv.Tx, string) (bool, error)
+	claimClearAllowedTxMutex       sync.RWMutex
+	claimClearAllowedTxArgsForCall []struct {
+		arg1 context.Context
+		arg2 kv.Tx
+		arg3 string
+	}
+	claimClearAllowedTxReturns struct {
+		result1 bool
+		result2 error
+	}
+	claimClearAllowedTxReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
 	ObserveStub        func(context.Context, string) error
 	observeMutex       sync.RWMutex
 	observeArgsForCall []struct {
@@ -33,6 +49,19 @@ type TerminalClaims struct {
 		result1 error
 	}
 	observeReturnsOnCall map[int]struct {
+		result1 error
+	}
+	ObserveTxStub        func(context.Context, kv.Tx, string) error
+	observeTxMutex       sync.RWMutex
+	observeTxArgsForCall []struct {
+		arg1 context.Context
+		arg2 kv.Tx
+		arg3 string
+	}
+	observeTxReturns struct {
+		result1 error
+	}
+	observeTxReturnsOnCall map[int]struct {
 		result1 error
 	}
 	invocations      map[string][][]interface{}
@@ -104,6 +133,72 @@ func (fake *TerminalClaims) ClaimClearAllowedReturnsOnCall(i int, result1 bool, 
 	}{result1, result2}
 }
 
+func (fake *TerminalClaims) ClaimClearAllowedTx(arg1 context.Context, arg2 kv.Tx, arg3 string) (bool, error) {
+	fake.claimClearAllowedTxMutex.Lock()
+	ret, specificReturn := fake.claimClearAllowedTxReturnsOnCall[len(fake.claimClearAllowedTxArgsForCall)]
+	fake.claimClearAllowedTxArgsForCall = append(fake.claimClearAllowedTxArgsForCall, struct {
+		arg1 context.Context
+		arg2 kv.Tx
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.ClaimClearAllowedTxStub
+	fakeReturns := fake.claimClearAllowedTxReturns
+	fake.recordInvocation("ClaimClearAllowedTx", []interface{}{arg1, arg2, arg3})
+	fake.claimClearAllowedTxMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *TerminalClaims) ClaimClearAllowedTxCallCount() int {
+	fake.claimClearAllowedTxMutex.RLock()
+	defer fake.claimClearAllowedTxMutex.RUnlock()
+	return len(fake.claimClearAllowedTxArgsForCall)
+}
+
+func (fake *TerminalClaims) ClaimClearAllowedTxCalls(stub func(context.Context, kv.Tx, string) (bool, error)) {
+	fake.claimClearAllowedTxMutex.Lock()
+	defer fake.claimClearAllowedTxMutex.Unlock()
+	fake.ClaimClearAllowedTxStub = stub
+}
+
+func (fake *TerminalClaims) ClaimClearAllowedTxArgsForCall(i int) (context.Context, kv.Tx, string) {
+	fake.claimClearAllowedTxMutex.RLock()
+	defer fake.claimClearAllowedTxMutex.RUnlock()
+	argsForCall := fake.claimClearAllowedTxArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *TerminalClaims) ClaimClearAllowedTxReturns(result1 bool, result2 error) {
+	fake.claimClearAllowedTxMutex.Lock()
+	defer fake.claimClearAllowedTxMutex.Unlock()
+	fake.ClaimClearAllowedTxStub = nil
+	fake.claimClearAllowedTxReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *TerminalClaims) ClaimClearAllowedTxReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.claimClearAllowedTxMutex.Lock()
+	defer fake.claimClearAllowedTxMutex.Unlock()
+	fake.ClaimClearAllowedTxStub = nil
+	if fake.claimClearAllowedTxReturnsOnCall == nil {
+		fake.claimClearAllowedTxReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.claimClearAllowedTxReturnsOnCall[i] = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
 func (fake *TerminalClaims) Observe(arg1 context.Context, arg2 string) error {
 	fake.observeMutex.Lock()
 	ret, specificReturn := fake.observeReturnsOnCall[len(fake.observeArgsForCall)]
@@ -162,6 +257,69 @@ func (fake *TerminalClaims) ObserveReturnsOnCall(i int, result1 error) {
 		})
 	}
 	fake.observeReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *TerminalClaims) ObserveTx(arg1 context.Context, arg2 kv.Tx, arg3 string) error {
+	fake.observeTxMutex.Lock()
+	ret, specificReturn := fake.observeTxReturnsOnCall[len(fake.observeTxArgsForCall)]
+	fake.observeTxArgsForCall = append(fake.observeTxArgsForCall, struct {
+		arg1 context.Context
+		arg2 kv.Tx
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.ObserveTxStub
+	fakeReturns := fake.observeTxReturns
+	fake.recordInvocation("ObserveTx", []interface{}{arg1, arg2, arg3})
+	fake.observeTxMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *TerminalClaims) ObserveTxCallCount() int {
+	fake.observeTxMutex.RLock()
+	defer fake.observeTxMutex.RUnlock()
+	return len(fake.observeTxArgsForCall)
+}
+
+func (fake *TerminalClaims) ObserveTxCalls(stub func(context.Context, kv.Tx, string) error) {
+	fake.observeTxMutex.Lock()
+	defer fake.observeTxMutex.Unlock()
+	fake.ObserveTxStub = stub
+}
+
+func (fake *TerminalClaims) ObserveTxArgsForCall(i int) (context.Context, kv.Tx, string) {
+	fake.observeTxMutex.RLock()
+	defer fake.observeTxMutex.RUnlock()
+	argsForCall := fake.observeTxArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *TerminalClaims) ObserveTxReturns(result1 error) {
+	fake.observeTxMutex.Lock()
+	defer fake.observeTxMutex.Unlock()
+	fake.ObserveTxStub = nil
+	fake.observeTxReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *TerminalClaims) ObserveTxReturnsOnCall(i int, result1 error) {
+	fake.observeTxMutex.Lock()
+	defer fake.observeTxMutex.Unlock()
+	fake.ObserveTxStub = nil
+	if fake.observeTxReturnsOnCall == nil {
+		fake.observeTxReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.observeTxReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

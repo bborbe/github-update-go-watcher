@@ -34,6 +34,17 @@ type TerminalClaims interface {
 	// deterministically stops progressing re-emits every poll interval (10m)
 	// instead of every InFlightTTL (14 days).
 	ClaimClearAllowed(ctx context.Context, taskID string) (bool, error)
+
+	// ObserveTx is Observe inside a caller-supplied transaction.
+	//
+	// A Kafka batch handler runs inside db.Update, which already holds the
+	// database's write lock, and libkv's DB is NOT reentrant — a handler that
+	// called Observe would open a second Update on the same lock and deadlock on
+	// the first event. The consumer therefore passes the tx it was given.
+	ObserveTx(ctx context.Context, tx libkv.Tx, taskID string) error
+	// ClaimClearAllowedTx is ClaimClearAllowed inside a caller-supplied
+	// transaction, for the same reason as ObserveTx.
+	ClaimClearAllowedTx(ctx context.Context, tx libkv.Tx, taskID string) (bool, error)
 }
 
 // terminalClaimsBucket holds one key per observed identifier, plus a
@@ -60,17 +71,7 @@ type terminalClaims struct {
 
 func (c *terminalClaims) Observe(ctx context.Context, taskID string) error {
 	return c.db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists(
-			ctx,
-			libkv.NewBucketName(terminalClaimsBucket),
-		)
-		if err != nil {
-			return errors.Wrapf(ctx, err, "create bucket %s", terminalClaimsBucket)
-		}
-		if err := bucket.Put(ctx, []byte(taskID), terminalClaimMarker); err != nil {
-			return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
-		}
-		return nil
+		return c.ObserveTx(ctx, tx, taskID)
 	})
 }
 
@@ -80,39 +81,65 @@ func (c *terminalClaims) ClaimClearAllowed(
 ) (bool, error) {
 	allowed := false
 	err := c.db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
-		bucket, err := tx.Bucket(ctx, libkv.NewBucketName(terminalClaimsBucket))
-		if err != nil {
-			// No bucket means nothing has been observed yet. That is a normal
-			// state on a fresh process, not a fault — do not log per repo per
-			// cycle over it.
-			if stderrors.Is(err, libkv.ErrBucketNotFound) {
-				return nil
-			}
-			return errors.Wrapf(ctx, err, "open bucket %s", terminalClaimsBucket)
-		}
-		observed, err := bucket.Get(ctx, []byte(taskID))
-		if err != nil {
-			return errors.Wrapf(ctx, err, "read taskID=%s", taskID)
-		}
-		if !observed.Exists() {
-			return nil
-		}
-		clearedKey := taskID + ":cleared"
-		cleared, err := bucket.Get(ctx, []byte(clearedKey))
-		if err != nil {
-			return errors.Wrapf(ctx, err, "read taskID=%s marker", taskID)
-		}
-		if cleared.Exists() {
-			return nil
-		}
-		if err := bucket.Put(ctx, []byte(clearedKey), terminalClaimMarker); err != nil {
-			return errors.Wrapf(ctx, err, "consume entitlement taskID=%s", taskID)
-		}
-		allowed = true
-		return nil
+		var err error
+		allowed, err = c.ClaimClearAllowedTx(ctx, tx, taskID)
+		return err
 	})
 	if err != nil {
 		return false, err
 	}
 	return allowed, nil
+}
+
+func (c *terminalClaims) ObserveTx(
+	ctx context.Context,
+	tx libkv.Tx,
+	taskID string,
+) error {
+	bucket, err := tx.CreateBucketIfNotExists(
+		ctx,
+		libkv.NewBucketName(terminalClaimsBucket),
+	)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "create bucket %s", terminalClaimsBucket)
+	}
+	if err := bucket.Put(ctx, []byte(taskID), terminalClaimMarker); err != nil {
+		return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
+	}
+	return nil
+}
+
+func (c *terminalClaims) ClaimClearAllowedTx(
+	ctx context.Context,
+	tx libkv.Tx,
+	taskID string,
+) (bool, error) {
+	bucket, err := tx.Bucket(ctx, libkv.NewBucketName(terminalClaimsBucket))
+	if err != nil {
+		// No bucket means nothing has been observed yet. That is a normal state
+		// on a fresh process, not a fault — do not log per repo per cycle over it.
+		if stderrors.Is(err, libkv.ErrBucketNotFound) {
+			return false, nil
+		}
+		return false, errors.Wrapf(ctx, err, "open bucket %s", terminalClaimsBucket)
+	}
+	observed, err := bucket.Get(ctx, []byte(taskID))
+	if err != nil {
+		return false, errors.Wrapf(ctx, err, "read taskID=%s", taskID)
+	}
+	if !observed.Exists() {
+		return false, nil
+	}
+	clearedKey := taskID + ":cleared"
+	cleared, err := bucket.Get(ctx, []byte(clearedKey))
+	if err != nil {
+		return false, errors.Wrapf(ctx, err, "read taskID=%s marker", taskID)
+	}
+	if cleared.Exists() {
+		return false, nil
+	}
+	if err := bucket.Put(ctx, []byte(clearedKey), terminalClaimMarker); err != nil {
+		return false, errors.Wrapf(ctx, err, "consume entitlement taskID=%s", taskID)
+	}
+	return true, nil
 }
