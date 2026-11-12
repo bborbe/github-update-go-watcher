@@ -1,7 +1,9 @@
 ---
-status: draft
+status: approved
 spec: [007-bug-emission-claim-survives-a-failed-emission]
 summary: Clears the emission claim when the emitted task can no longer progress — terminal, or parked at human_review — via a task-lifecycle consumer, so a failed emission no longer suppresses a re-emit for 14 days
+created: "2026-11-12T18:48:17Z"
+queued: "2026-11-12T18:48:17Z"
 ---
 
 <summary>
