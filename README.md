@@ -43,6 +43,7 @@ Implemented. Not yet deployed — deployment (the Helm chart in `bborbe/nuke`) i
 |---|---|---|---|
 | `OWNER` | yes | — | GitHub owner/org to scan (e.g. `bborbe`) |
 | `STAGE` | yes | — | Deployment stage (`dev`\|`prod`), stamped on every emitted task |
+| `TARGET_VAULT` | yes | — | Vault slug stamped on every emitted task (e.g. `openclaw`). The controller refuses an empty `target_vault` instead of falling back, so an unset value fails at startup rather than silently disabling the pipeline |
 | `KAFKA_BROKERS` | yes | — | Comma-separated list of Kafka brokers |
 | `REPO_ALLOWLIST` | no | empty (allow-all) | Comma-separated host-qualified repo allowlist (`github.com/owner/repo`); empty = allow-all within `OWNER` |
 | `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the Helm chart in `bborbe/nuke`) |
