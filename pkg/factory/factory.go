@@ -95,6 +95,7 @@ func CreateWatcher(
 	updateScope string,
 	taskCreationFilter filter.TaskCreationFilter,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	terminalClaims pkg.TerminalClaims,
 ) pkg.Watcher {
 	ghClient := pkg.NewGitHubClient(githubHTTPClient)
 	goDevClient := pkg.NewGoDevClient(goDevHTTPClient, pkg.DefaultGoDevURL)
@@ -112,6 +113,7 @@ func CreateWatcher(
 		owner,
 		taskCreationFilter,
 		currentDateTimeGetter,
+		terminalClaims,
 	)
 }
 

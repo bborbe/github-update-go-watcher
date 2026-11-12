@@ -53,6 +53,7 @@ func NewWatcher(
 	owner string,
 	taskCreationFilter filter.TaskCreationFilter,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	terminalClaims TerminalClaims,
 ) Watcher {
 	return &watcher{
 		ghClient:              ghClient,
@@ -64,6 +65,7 @@ func NewWatcher(
 		owner:                 owner,
 		taskCreationFilter:    taskCreationFilter,
 		currentDateTimeGetter: currentDateTimeGetter,
+		terminalClaims:        terminalClaims,
 	}
 }
 
@@ -77,6 +79,7 @@ type watcher struct {
 	owner                 string
 	taskCreationFilter    filter.TaskCreationFilter
 	currentDateTimeGetter libtime.CurrentDateTimeGetter
+	terminalClaims        TerminalClaims
 }
 
 func (w *watcher) Poll(ctx context.Context, force bool) error {
@@ -313,6 +316,63 @@ func clearInFlight(cursorState *Cursor, repoKey, target string) {
 	state.InFlightSince = ""
 }
 
+// clearFailedEmission drops the emission claim for repoKey when it targets
+// target, AND drops the sha_unchanged dedup keys.
+//
+// The dedup-key drop is required, not incidental. With the claim gone but
+// LastSeenHeadSHA intact, SHAUnchangedFilter still matches — the failed emission
+// did not move HEAD — and suppresses the very re-emit this path exists to
+// produce, making the whole condition inert. Treating the repo as never-emitted
+// is the correct state: the emission demonstrably produced nothing.
+// CompletedHeadSHA survives: it is the merge-detection marker, not a dedup key.
+func clearFailedEmission(cursorState *Cursor, repoKey, target string) {
+	state := cursorState.Repos[repoKey]
+	if state == nil || state.InFlightTarget != target {
+		return
+	}
+	state.InFlightTarget = ""
+	state.InFlightSince = ""
+	state.LastSeenHeadSHA = ""
+	state.LastSeenGoVersion = ""
+}
+
+// terminalEmission reports whether the emission claim's own task can no longer
+// progress, consuming the entitlement to end the claim for it.
+//
+// The identifier is derived, not stored: markPublished writes LastSeenHeadSHA,
+// LastSeenGoVersion and InFlightTarget in one assignment from the same
+// candidate, and a live claim suppresses every later publish, so no later write
+// can move LastSeenHeadSHA out from under a live claim.
+//
+// An empty LastSeenHeadSHA yields no identifier, and a store fault returns
+// false — a store error must never end a claim.
+func (w *watcher) terminalEmission(
+	ctx context.Context,
+	repo Repo,
+	state *RepoState,
+) bool {
+	if w.terminalClaims == nil || state.LastSeenHeadSHA == "" {
+		return false
+	}
+	taskID := DeriveTaskID(
+		repo.Owner,
+		repo.Name,
+		state.InFlightTarget,
+		state.LastSeenHeadSHA,
+	).String()
+	allowed, err := w.terminalClaims.ClaimClearAllowed(ctx, taskID)
+	if err != nil {
+		glog.Warningf(
+			"emission claim: read terminal state failed repo=%s taskID=%s err=%v",
+			repo.Key(),
+			taskID,
+			err,
+		)
+		return false
+	}
+	return allowed
+}
+
 // inFlightExpired reports whether the claim is past InFlightTTL. An unparsable
 // InFlightSince counts as expired: a bad timestamp must not suppress a repo
 // forever. Expiring fails open — the repo is re-emitted and a duplicate is
@@ -404,6 +464,19 @@ func (w *watcher) emissionInFlight(
 	// claim live on the ahead-of and unparsable cases.
 	if !candidate.GoBehind() {
 		clearInFlight(cursorState, repo.Key(), target)
+		return false
+	}
+	// The emission's task can no longer progress — it is terminal, or parked at
+	// phase human_review where no Config dispatches it. Neither the convergence
+	// branch above nor the TTL backstop below can see that: the repo is still
+	// behind, and the claim is not yet 14 days old. Without this branch a failed
+	// emission freezes its repo for the whole InFlightTTL.
+	//
+	// Evaluated after the open-PR gate (gateRepo), so a human_review row whose
+	// update PR is open is already skipped reason=open_update_pr and its claim
+	// already cleared there — what reaches here is a parked row with no PR.
+	if w.terminalEmission(ctx, repo, state) {
+		clearFailedEmission(cursorState, repo.Key(), target)
 		return false
 	}
 	if inFlightExpired(ctx, state, w.currentDateTimeGetter.Now()) {

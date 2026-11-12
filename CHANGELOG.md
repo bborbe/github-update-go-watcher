@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: Clear the emission claim when the emitted task can no longer progress. The claim's four clearing paths all missed a task that reached a terminal status, or was parked at `phase: human_review` where no Config dispatches it, so a failed emission suppressed its repo for the whole 14-day `InFlightTTL`. The watcher now consumes the task lifecycle event topic (the stream `github-pr-watcher` already consumes) and ends the claim once per emitted task, dropping the `sha_unchanged` dedup keys so the re-emit is not suppressed by the unchanged HEAD. Measured 2026-11-12: 42 of 98 repos behind go 1.27.4 were skipped `reason=emission_in_flight`, and 39 records sat non-terminal at `human_review`.
+
 ## v0.9.0
 
 - feat: Add a cluster build arm to `Makefile.docker` — `BUILD_TARGET=local` (the default) keeps the local `docker build` unchanged, while any other value dispatches to `hack/build-cluster.sh` to build and push inside that cluster. The local guards are scoped to the local arm, a caller-supplied `VERSION` is mandatory for the cluster arm, and `upload`, `clean` and `buca` are refused for a cluster target.

@@ -107,6 +107,15 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix)
 	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix)
 	currentDateTime := libtime.NewCurrentDateTime()
+	// In-process kv DB: the offset store and the terminal-claims store. A
+	// restart replays the event topic from its oldest offset, which is safe (the
+	// emitted task identifier is a deterministic UUID5) and useful (the replay
+	// rebuilds the non-progressing set from history).
+	saramaClientProvider := kafka.NewSaramaClientProviderNew(
+		kafka.ParseBrokersFromString(a.KafkaBrokers),
+	)
+	db := pkg.NewMemDB()
+	terminalClaims := pkg.NewTerminalClaims(db)
 	w := factory.CreateWatcher(
 		httpClient,
 		factory.CreateGoDevHTTPClient(),
@@ -119,6 +128,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.UpdateScope,
 		factory.CreateStaticFilters(allowlist),
 		currentDateTime,
+		terminalClaims,
 	)
 	gate := pkg.NewCycleGate()
 	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate)
@@ -132,6 +142,11 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		ctx,
 		a.pollLoop(w, gate, pollInterval),
 		a.createHTTPServer(sentryClient),
+		// Consumes the task lifecycle event stream and records identifiers whose
+		// task can no longer progress, so a failed emission stops suppressing its
+		// repo. service.Run wraps every func in run.CancelOnFirstFinishWait, which
+		// is why this one must never return on a recoverable error.
+		pkg.NewTerminalClaimsConsumer(saramaClientProvider, db, a.TopicPrefix, terminalClaims),
 	)
 }
 
