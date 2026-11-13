@@ -1,0 +1,99 @@
+// Copyright (c) 2026 Benjamin Borbe All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package pkg_test
+
+import (
+	"context"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/bborbe/github-update-go-watcher/pkg"
+)
+
+var _ = Describe("TerminalClaims", func() {
+	var (
+		ctx   context.Context
+		store pkg.TerminalClaims
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		store = pkg.NewTerminalClaims(pkg.NewMemDB())
+	})
+
+	It("reports nothing for an identifier never observed", func() {
+		allowed, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(allowed).To(BeFalse())
+	})
+
+	It("is clearable until the entitlement is consumed", func() {
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+
+		first, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first).To(BeTrue())
+
+		// Reading alone does not spend it — the caller consumes only once its own
+		// state is durable.
+		again, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again).To(BeTrue())
+
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+		spent, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spent).To(BeFalse(),
+			"the entitlement is consumed, so a second cycle cannot end the claim again")
+	})
+
+	It("does not re-arm the entitlement when observed again", func() {
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+
+		// A second terminal event for the same identifier — the re-emitted task
+		// stopping again at the same HEAD — must not re-open the entitlement.
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		clearable, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(clearable).To(BeFalse())
+	})
+
+	It("re-arms a consumed entitlement", func() {
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+		spent, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spent).To(BeFalse())
+
+		// A re-emit that did not move HEAD re-arms a claim with the same
+		// identifier; without Rearm that claim could never be cleared again.
+		Expect(store.Rearm(ctx, "task-1")).To(Succeed())
+		// A re-arm requires a FRESH observation: without that the repo would
+		// re-emit every poll interval instead of once per terminal event.
+		clearable, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(clearable).To(BeFalse(), "a re-armed claim waits for a new non-progressing event")
+
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		clearable, err = store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(clearable).To(BeTrue())
+	})
+
+	It("tracks identifiers independently", func() {
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+
+		allowed, err := store.Clearable(ctx, "task-2")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(allowed).To(BeFalse())
+
+		allowed, err = store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(allowed).To(BeFalse())
+	})
+})

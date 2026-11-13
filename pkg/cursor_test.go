@@ -6,6 +6,7 @@ package pkg_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -67,6 +68,79 @@ var _ = Describe("LoadCursor", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenHeadSHA).To(Equal("abc"))
 		Expect(loaded.Repos["github.com/bborbe/a"].LastSeenGoVersion).To(Equal(""))
+	})
+
+	It("round-trips both emission-claim fields and their wire keys", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		orig := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/a": {
+					LastSeenHeadSHA: "abc",
+					InFlightTarget:  "1.27.2",
+					InFlightSince:   "2026-10-27T12:00:00Z",
+				},
+			},
+		}
+		Expect(pkg.SaveCursor(ctx, path, orig)).To(Succeed())
+		loaded, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loaded.Repos["github.com/bborbe/a"].InFlightTarget).To(Equal("1.27.2"))
+		Expect(loaded.Repos["github.com/bborbe/a"].InFlightSince).
+			To(Equal("2026-10-27T12:00:00Z"))
+
+		raw, err := os.ReadFile(path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"in_flight_target":"1.27.2"`))
+		Expect(string(raw)).To(ContainSubstring(`"in_flight_since":"2026-10-27T12:00:00Z"`))
+	})
+
+	It("an empty emission claim serialises to nothing", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		orig := &pkg.Cursor{
+			Repos: map[string]*pkg.RepoState{
+				"github.com/bborbe/a": {LastSeenHeadSHA: "abc"},
+			},
+		}
+		Expect(pkg.SaveCursor(ctx, path, orig)).To(Succeed())
+		raw, err := os.ReadFile(path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("in_flight_target"))
+		Expect(string(raw)).NotTo(ContainSubstring("in_flight_since"))
+	})
+
+	It("loads a pre-fix cursor entry with an empty emission claim", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "cursor.json")
+		legacy := `{"repos":{"github.com/bborbe/a":` +
+			`{"last_seen_head_sha":"abc","last_seen_go_version":"1.27.2"}}}`
+		Expect(os.WriteFile(path, []byte(legacy), 0600)).To(Succeed())
+		loaded, err := pkg.LoadCursor(ctx, path)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(loaded.Repos["github.com/bborbe/a"].InFlightTarget).To(Equal(""))
+		Expect(loaded.Repos["github.com/bborbe/a"].InFlightSince).To(Equal(""))
+	})
+
+	It("an older binary ignores the emission-claim keys and keeps the old fields", func() {
+		type legacyRepoState struct {
+			LastSeenHeadSHA   string `json:"last_seen_head_sha"`
+			LastSeenGoVersion string `json:"last_seen_go_version,omitempty"`
+			CompletedHeadSHA  string `json:"completed_head_sha,omitempty"`
+		}
+		type legacyCursor struct {
+			Repos map[string]*legacyRepoState `json:"repos"`
+		}
+
+		current := `{"repos":{"github.com/bborbe/a":{` +
+			`"last_seen_head_sha":"abc","last_seen_go_version":"1.27.2",` +
+			`"in_flight_target":"1.27.2","in_flight_since":"2026-10-27T12:00:00Z"}}}`
+		var legacy legacyCursor
+		Expect(json.Unmarshal([]byte(current), &legacy)).To(Succeed())
+		Expect(legacy.Repos["github.com/bborbe/a"].LastSeenHeadSHA).To(Equal("abc"))
+		Expect(legacy.Repos["github.com/bborbe/a"].LastSeenGoVersion).To(Equal("1.27.2"))
+
+		reencoded, err := json.Marshal(legacy)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(reencoded)).To(ContainSubstring(`"last_seen_head_sha":"abc"`))
+		Expect(string(reencoded)).To(ContainSubstring(`"last_seen_go_version":"1.27.2"`))
 	})
 
 	It("null repos becomes non-nil empty map", func() {

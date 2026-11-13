@@ -9,10 +9,14 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 
 	taskmocks "github.com/bborbe/agent/mocks"
+	libtime "github.com/bborbe/time"
+	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/bborbe/github-update-go-watcher/mocks"
 	"github.com/bborbe/github-update-go-watcher/pkg"
@@ -21,14 +25,16 @@ import (
 
 var _ = Describe("watcher", func() {
 	var (
-		ghClient       *mocks.GitHubClient
-		goDevClient    *mocks.GoDevClient
-		publisher      *mocks.TaskPublisher
-		completeSender *taskmocks.TaskCompleteCommandSender
-		metrics        *mocks.Metrics
-		watcher        pkg.Watcher
-		cursorPath     string
-		allowlist      []string
+		ghClient        *mocks.GitHubClient
+		goDevClient     *mocks.GoDevClient
+		publisher       *mocks.TaskPublisher
+		completeSender  *taskmocks.TaskCompleteCommandSender
+		metrics         *mocks.Metrics
+		watcher         pkg.Watcher
+		cursorPath      string
+		allowlist       []string
+		currentDateTime libtime.CurrentDateTime
+		terminalClaims  *mocks.TerminalClaims
 	)
 
 	BeforeEach(func() {
@@ -40,6 +46,9 @@ var _ = Describe("watcher", func() {
 		completeSender = new(taskmocks.TaskCompleteCommandSender)
 		metrics = &mocks.Metrics{}
 		allowlist = []string{"github.com/bborbe/disk-status"}
+		currentDateTime = libtime.NewCurrentDateTime()
+		terminalClaims = &mocks.TerminalClaims{}
+		terminalClaims.ClearableReturns(false, nil)
 	})
 
 	buildWatcher := func() {
@@ -59,6 +68,8 @@ var _ = Describe("watcher", func() {
 			cursorPath,
 			"bborbe",
 			taskFilter,
+			currentDateTime,
+			terminalClaims,
 		)
 	}
 
@@ -973,5 +984,416 @@ var _ = Describe("watcher", func() {
 				Expect(reason).To(Equal(""))
 			})
 		})
+
+		Context("emission claim write (spec 005)", func() {
+			const repoKey = "github.com/bborbe/disk-status"
+
+			BeforeEach(func() {
+				ghClient.ListReposReturns([]pkg.Repo{
+					{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+				}, nil)
+				ghClient.GetHeadSHAReturns(
+					"d630ef3526cfc57fbdccd9ba53c5c3a02945e407",
+					nil,
+				)
+				ghClient.GetGoModReturns([]byte("go 1.24"), nil)
+				ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+				goDevClient.LatestStableReturns(pkg.Version{
+					Major: 1, Minor: 26, Patch: 6, Raw: "1.26.6",
+				}, nil)
+				metrics.IncFilterSkippedStub = func(string) {}
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-27T12:00:00Z"))
+				buildWatcher()
+			})
+
+			It("a successful publish records the claim", func() {
+				publisher.PublishCreateReturns(true)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				entry, ok := loaded.Repos[repoKey]
+				Expect(ok).To(BeTrue())
+				Expect(entry.InFlightTarget).To(Equal("1.26.6"))
+				Expect(entry.InFlightSince).To(Equal("2026-10-27T12:00:00Z"))
+			})
+
+			It("a failed publish records no claim", func() {
+				publisher.PublishCreateReturns(false)
+
+				err := watcher.Poll(context.Background(), false)
+				Expect(err).NotTo(HaveOccurred())
+
+				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				if entry, ok := loaded.Repos[repoKey]; ok {
+					Expect(entry.InFlightTarget).To(BeEmpty())
+					Expect(entry.InFlightSince).To(BeEmpty())
+				}
+				content, err := os.ReadFile(cursorPath)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(content)).NotTo(ContainSubstring("in_flight_target"))
+			})
+		})
+	})
+})
+
+var _ = Describe("emission claim (spec 005)", func() {
+	var (
+		reg             *prometheus.Registry
+		metrics         pkg.Metrics
+		currentDateTime libtime.CurrentDateTime
+		watcher         pkg.Watcher
+		cursorPath      string
+		ghClient        *mocks.GitHubClient
+		goDevClient     *mocks.GoDevClient
+		publisher       *mocks.TaskPublisher
+		completeSender  *taskmocks.TaskCompleteCommandSender
+		terminalClaims  *mocks.TerminalClaims
+	)
+	const (
+		repoKey = "github.com/bborbe/disk-status"
+		oldSHA  = "aaaa000000000000000000000000000000000000"
+		newSHA  = "bbbb000000000000000000000000000000000000"
+	)
+	// now reads the injected clock — never the system clock.
+	now := func() libtime.DateTime { return currentDateTime.Now() }
+
+	BeforeEach(func() {
+		reg = prometheus.NewRegistry()
+		metrics = pkg.NewMetrics(reg)
+		currentDateTime = libtime.NewCurrentDateTime()
+		currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-27T12:00:00Z"))
+		cursorPath = GinkgoT().TempDir() + "/cursor.json"
+		ghClient = &mocks.GitHubClient{}
+		goDevClient = &mocks.GoDevClient{}
+		publisher = &mocks.TaskPublisher{}
+		completeSender = new(taskmocks.TaskCompleteCommandSender)
+		terminalClaims = &mocks.TerminalClaims{}
+		terminalClaims.ClearableReturns(false, nil)
+
+		ghClient.ListReposReturns([]pkg.Repo{
+			{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+		}, nil)
+		ghClient.GetHeadSHAReturns(newSHA, nil)
+		ghClient.GetGoModReturns([]byte("go 1.27.1"), nil)
+		ghClient.GetMaintainerConfigReturns(filter.GrantedConsent, nil)
+		ghClient.HasOpenUpdatePRReturns(false, nil)
+		goDevClient.LatestStableReturns(pkg.Version{
+			Major: 1, Minor: 27, Patch: 2, Raw: "1.27.2",
+		}, nil)
+		publisher.PublishCreateReturns(true)
+
+		watcher = pkg.NewWatcher(
+			ghClient,
+			goDevClient,
+			publisher,
+			completeSender,
+			metrics,
+			cursorPath,
+			"bborbe",
+			filter.TaskCreationFilterList{
+				filter.NewRepoAllowlistFilter([]string{"github.com/bborbe/disk-status"}),
+				filter.NewGoModPresentFilter(),
+				filter.NewGoModParsableFilter(),
+				filter.NewGoBehindFilter(),
+				filter.NewAutoUpdateFilter(),
+			},
+			currentDateTime,
+			terminalClaims,
+		)
+	})
+
+	writeCursorState := func(repoStateJSON string) {
+		content := `{"repos":{"` + repoKey + `":` + repoStateJSON + `}}`
+		Expect(os.WriteFile(cursorPath, []byte(content), 0600)).To(Succeed())
+	}
+
+	readRepoState := func() *pkg.RepoState {
+		c, err := pkg.LoadCursor(context.Background(), cursorPath)
+		Expect(err).NotTo(HaveOccurred())
+		return c.Repos[repoKey]
+	}
+
+	// filterSkippedValue reads a counter through the registry — never through a
+	// mock spy, and never from a log line (the skip line is V(2)).
+	filterSkippedValue := func(reason string) float64 {
+		families, err := reg.Gather()
+		Expect(err).NotTo(HaveOccurred())
+		for _, f := range families {
+			if f.GetName() != "github_update_go_watcher_filter_skipped_total" {
+				continue
+			}
+			for _, m := range f.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "reason" && l.GetValue() == reason {
+						return m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		Fail("filter_skipped_total series not found reason=" + reason)
+		return 0
+	}
+
+	claimState := func(since libtime.DateTime) string {
+		return `{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.2",` +
+			`"in_flight_target":"1.27.2","in_flight_since":"` +
+			since.Format(time.RFC3339) + `"}`
+	}
+
+	It("a live claim suppresses a second emission", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(0.0))
+	})
+
+	// Spec 007: the emission's task can no longer progress (terminal, or parked at
+	// phase human_review). Without this branch the claim survives for the whole
+	// InFlightTTL and the repo is frozen.
+	It("a non-progressing emission task ends the claim and the repo is emitted", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		// The dedup keys must drop too: with LastSeenHeadSHA intact,
+		// SHAUnchangedFilter would suppress this very emission and the branch
+		// would be inert. A successful publish then re-arms a FRESH claim, so the
+		// cursor's observable is the re-stamped InFlightSince, not an empty
+		// InFlightTarget.
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(0.0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
+		Expect(readRepoState().LastSeenHeadSHA).To(Equal(newSHA))
+	})
+
+	It("derives the claim's task identifier from the cursor, not a stored field", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
+		_, taskID := terminalClaims.ClearableArgsForCall(0)
+		Expect(taskID).To(Equal(
+			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
+		))
+	})
+
+	It("a consumed entitlement keeps the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(false, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+	})
+
+	It("a store error does not end the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(false, errors.New("store unavailable"))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+	})
+
+	// The entitlement must be spent only after the cursor save succeeds. If it
+	// were consumed at read time, a rate-limited abort later in the same cycle
+	// would lose the cursor write but keep the consumption — and the repo would
+	// stay suppressed until the next pod restart.
+	It("does not spend the entitlement when the cycle aborts before saving", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+		ghClient.ListReposReturns([]pkg.Repo{
+			{Owner: "bborbe", Name: "disk-status", DefaultBranch: "main"},
+			{Owner: "bborbe", Name: "second", DefaultBranch: "main"},
+		}, nil)
+		// First repo passes the PR gate and clears its claim; the second repo is
+		// rate limited, which aborts the cycle before SaveCursor runs.
+		ghClient.HasOpenUpdatePRReturnsOnCall(0, false, nil)
+		ghClient.HasOpenUpdatePRReturnsOnCall(1, false, pkg.ErrRateLimited)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
+			"the cursor was never saved, so the entitlement must not be spent")
+	})
+
+	It("spends the entitlement once the cursor is saved", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
+		_, taskID := terminalClaims.ConsumeArgsForCall(0)
+		Expect(taskID).To(Equal(
+			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
+		))
+	})
+
+	// markPublished re-arms the entitlement for the identifier it writes, and
+	// consumePending runs later in the same cycle. If the identifier were still
+	// in that list the consumption would undo the re-arm and the claim would stay
+	// stuck — the defect the reviewer caught on the first version of this fix.
+	It("does not consume an entitlement it just re-armed", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		// HEAD unchanged, so the re-armed claim derives the SAME identifier as
+		// the one the clear appended — the stuck case this fix exists for.
+		ghClient.GetHeadSHAReturns(oldSHA, nil)
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.RearmCallCount()).To(Equal(1))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
+			"the publish replaced the claim, so there is nothing left to consume")
+	})
+
+	It("a converged repo never consults the terminal store", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.ClearableCallCount()).To(Equal(0))
+	})
+
+	It("convergence clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(readRepoState().InFlightSince).To(BeEmpty())
+		Expect(filterSkippedValue("go_current")).To(Equal(1.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("ahead-of clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go 1.28"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("an unparsable go.mod clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetGoModReturns([]byte("go banana"), nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("an open update PR clears the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.HasOpenUpdatePRReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(filterSkippedValue("open_update_pr")).To(Equal(1.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+	})
+
+	It("a GitHub error does not clear the claim", func() {
+		since := now().Add(-libtime.Hour)
+		writeCursorState(claimState(since))
+		ghClient.HasOpenUpdatePRReturns(false, errors.New("open pr check failed"))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+		Expect(readRepoState().InFlightSince).To(Equal(since.Format(time.RFC3339)))
+		Expect(filterSkippedValue("open_update_pr")).To(Equal(0.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+	})
+
+	It("the TTL re-arms the emission", func() {
+		writeCursorState(claimState(now().Add(-(pkg.InFlightTTL + libtime.Hour))))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
+	})
+
+	It("a repo with no claim still emits, and does not emit twice", func() {
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+	})
+
+	It("a forced cycle does not bypass the claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+	})
+
+	It("a different target version is not suppressed", func() {
+		writeCursorState(
+			`{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.1",` +
+				`"in_flight_target":"1.27.1","in_flight_since":"` +
+				now().Add(-libtime.Hour).Format(time.RFC3339) + `"}`,
+		)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+	})
+
+	It("an unparsable in_flight_since fails open", func() {
+		writeCursorState(
+			`{"last_seen_head_sha":"` + oldSHA + `","last_seen_go_version":"1.27.2",` +
+				`"in_flight_target":"1.27.2","in_flight_since":"not-a-timestamp"}`,
+		)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
+	})
+
+	It("a rate-limited gate leaves the claim untouched", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.HasOpenUpdatePRReturns(false, pkg.ErrRateLimited)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
 	})
 })

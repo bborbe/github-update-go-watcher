@@ -16,6 +16,7 @@ import (
 	"github.com/bborbe/kafka"
 	"github.com/bborbe/log"
 	libsentry "github.com/bborbe/sentry"
+	libtime "github.com/bborbe/time"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -49,12 +50,31 @@ func CreateGoDevHTTPClient() *http.Client {
 
 // CreateKafkaSender constructs the typed create-task command sender backed by
 // a Kafka sync producer.
+//
+// targetVault is stamped on every command that carries none. It must not be
+// empty: the controller refuses a create whose target_vault is empty rather
+// than falling back to its legacy default, so an unstamped command is a silent
+// no-op on the board — the publish succeeds and nothing is written (measured
+// 2026-11-12: 23 publishes, 0 task files).
 func CreateKafkaSender(
 	syncProducer kafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
+	targetVault string,
 ) task.CreateCommandSender {
-	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
-	return task.NewCreateCommandSender(sender, "")
+	return CreateCreateCommandSender(
+		cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory),
+		targetVault,
+	)
+}
+
+// CreateCreateCommandSender wraps a CommandObjectSender with the typed
+// create-task sender, stamping targetVault on commands that carry none. Split
+// out of CreateKafkaSender so the stamping is testable without a Kafka producer.
+func CreateCreateCommandSender(
+	sender cdb.CommandObjectSender,
+	targetVault string,
+) task.CreateCommandSender {
+	return task.NewCreateCommandSender(sender, targetVault)
 }
 
 // CreateKafkaCompleteSender constructs the typed complete-task command sender
@@ -63,9 +83,23 @@ func CreateKafkaSender(
 func CreateKafkaCompleteSender(
 	syncProducer kafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
+	targetVault string,
 ) task.CompleteCommandSender {
-	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
-	return task.NewCompleteCommandSender(sender, "")
+	return CreateCompleteCommandSender(
+		cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory),
+		targetVault,
+	)
+}
+
+// CreateCompleteCommandSender wraps a CommandObjectSender with the typed
+// complete-task sender, stamping targetVault on commands that carry none. The
+// complete command is routed by the same vault slug as the create, so both
+// senders must be given the same value.
+func CreateCompleteCommandSender(
+	sender cdb.CommandObjectSender,
+	targetVault string,
+) task.CompleteCommandSender {
+	return task.NewCompleteCommandSender(sender, targetVault)
 }
 
 // CreateStaticFilters builds the cycle-invariant chain in its frozen order.
@@ -93,6 +127,8 @@ func CreateWatcher(
 	stage string,
 	updateScope string,
 	taskCreationFilter filter.TaskCreationFilter,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	terminalClaims pkg.TerminalClaims,
 ) pkg.Watcher {
 	ghClient := pkg.NewGitHubClient(githubHTTPClient)
 	goDevClient := pkg.NewGoDevClient(goDevHTTPClient, pkg.DefaultGoDevURL)
@@ -109,6 +145,8 @@ func CreateWatcher(
 		cursorPath,
 		owner,
 		taskCreationFilter,
+		currentDateTimeGetter,
+		terminalClaims,
 	)
 }
 

@@ -111,7 +111,19 @@ type GitHubClient interface {
 
 // NewGitHubClient returns the production GitHubClient backed by the given
 // HTTP client (authenticated via GitHub App installation token).
+//
+// The client's transport is wrapped so every non-2xx GitHub API response emits
+// one structured log line (see non2xx_log.go), which is what makes primary
+// quota exhaustion distinguishable from secondary rate limiting in pod logs.
 func NewGitHubClient(httpClient *http.Client) GitHubClient {
+	inner := httpClient.Transport
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	httpClient.Transport = &non2xxLoggingTransport{
+		inner: inner,
+		log:   logNon2xxV2,
+	}
 	return &githubClient{client: gogithub.NewClient(httpClient)}
 }
 

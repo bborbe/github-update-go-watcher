@@ -9,7 +9,37 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * PATCH version when you make backwards-compatible bug fixes.
 
 ## Unreleased
+
 - fix: **the merge-detection completion seeds `DeriveTaskID` from the cycle's resolved Go version when the cursor entry carries none.** `markPublished` records `candidate.LatestGo`, the same value `BuildCreateCommand` seeds, so a cursor entry written by this code agrees with the create by construction. A cursor entry from before `last_seen_go_version` existed carries an empty string, and seeding from it minted the pre-2026-10-09 identifier (empty goVersion segment) for a task the create filed *with* a version — the `CompleteCommand` addressed a task nobody created, so the real task stayed open forever and the repo kept re-emitting. `completeTask` now falls back to the cycle's resolved version, the only value a create would seed today, and logs a WARNING naming the repo, SHA and chosen version so a legacy entry is visible rather than inferred. The fallback is wrong only if the target version advanced between the create and the merge; the empty seed was wrong always. The cursor test that pinned the old behaviour is inverted: it now asserts the emitted identifier equals the one a create at this HEAD mints, and explicitly not the empty-version one.
+
+## v0.10.0
+
+- fix: Stamp `target_vault` on every emitted create-task and complete-task command. Both senders were built with an empty default vault and the task frontmatter never carried the field, so every command went out with an empty `target_vault` and the controller refused it at validation (`invalid target_vault … the producer must stamp the owning vault`) instead of falling back to its legacy default. The publish succeeded and nothing was written — measured on prod 2026-11-12: 23 publishes, 0 task files, invisible on the watcher side. `TARGET_VAULT` is now required, so an unset vault fails at startup rather than silently disabling the pipeline.
+
+## v0.9.1
+
+- fix: Clear the emission claim when the emitted task can no longer progress. The claim's four clearing paths all missed a task that reached a terminal status, or was parked at `phase: human_review` where no Config dispatches it, so a failed emission suppressed its repo for the whole 14-day `InFlightTTL`. The watcher now consumes the task lifecycle event topic (the stream `github-pr-watcher` already consumes) and ends the claim once per emitted task, dropping the `sha_unchanged` dedup keys so the re-emit is not suppressed by the unchanged HEAD. Measured 2026-11-12: 42 of 98 repos behind go 1.27.4 were skipped `reason=emission_in_flight`, and 39 records sat non-terminal at `human_review`.
+
+## v0.9.0
+
+- feat: Add a cluster build arm to `Makefile.docker` — `BUILD_TARGET=local` (the default) keeps the local `docker build` unchanged, while any other value dispatches to `hack/build-cluster.sh` to build and push inside that cluster. The local guards are scoped to the local arm, a caller-supplied `VERSION` is mandatory for the cluster arm, and `upload`, `clean` and `buca` are refused for a cluster target.
+
+## v0.8.2
+
+- chore: restate the do-not-merge contract in the gate workflow
+
+## v0.8.1
+
+- chore: update github.com/bborbe/agent to v0.138.0, github.com/bborbe/collection to v1.21.6, github.com/bborbe/cqrs to v0.6.15, github.com/bborbe/errors to v1.6.6, github.com/bborbe/http to v1.26.32, github.com/bborbe/kafka to v1.29.11, github.com/bborbe/log to v1.7.6, github.com/bborbe/maintainer to v0.51.0, github.com/bborbe/metrics to v0.6.9, github.com/bborbe/run to v1.11.10, github.com/bborbe/sentry to v1.10.7, github.com/bborbe/service to v1.11.2, github.com/bborbe/time to v1.27.25, github.com/bborbe/validation to v1.5.8, github.com/onsi/ginkgo/v2 to v2.34.0
+
+## v0.8.0
+
+- feat: log every non-2xx GitHub API response at the HTTP client boundary (`-v=2`), one line per response carrying `method`, `host`, `path`, `status`, `X-RateLimit-Resource`, `X-RateLimit-Remaining`, `Retry-After` and a 200-rune body snippet — so primary-quota exhaustion and secondary rate limiting are distinguishable in pod logs without a repro. Missing headers and empty bodies log the literal `absent`; the body is restored for the caller; the full URL and request headers are never logged.
+
+## v0.7.0
+
+- feat: persist an emission claim (`in_flight_target` + `in_flight_since`) in each cursor entry, written only by a successful publish, so the next change can suppress re-emission while a filed update task is still queued; both keys are `omitempty` and older binaries ignore them.
+- fix: stop the watcher filing a second update task for a repo whose first task is still queued. The cursor now carries an emission claim (`in_flight_target` + `in_flight_since`) written by a successful publish, and a repo whose claim still targets the cycle's Go version is skipped with reason `emission_in_flight` — closing the window between emission and the agent's first push, where no `fix/update-go-*` PR exists yet and a second commit re-emitted (two task records, two agent runs, two PRs for one bump; measured on the Go 1.27.2 rollout for `bborbe/agent-code` and `bborbe/agent-gemini`). The claim clears on convergence, on an observed open update PR, or on a 14-day `InFlightTTL` backstop; a GitHub error never clears it, a rate-limited cycle leaves it untouched, and a forced cycle does not bypass it. The open-PR gate, the `sha_unchanged` filter and the task identity seed are unchanged.
 
 ## v0.6.8
 - chore: bump Go toolchain directive to 1.27.3

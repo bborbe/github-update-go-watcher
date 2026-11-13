@@ -1,5 +1,5 @@
 ---
-status: approved
+status: verifying
 tags:
     - dark-factory
     - spec

@@ -44,6 +44,21 @@ type RepoState struct {
 	// the controller executor is idempotent, but the cursor marker keeps the
 	// no-op off the wire.
 	CompletedHeadSHA string `json:"completed_head_sha,omitempty"`
+	// InFlightTarget is the target Go version — three-part form, e.g. "1.27.2",
+	// the same string the emitted task carries as latest_go — that this watcher
+	// last filed a create-task for on this repo. InFlightSince is when it filed
+	// it (RFC3339, UTC). Together they are the emission claim: while a claim
+	// still targets the cycle's target version, the repo is not emitted again,
+	// which covers the window between emission and the agent opening its update
+	// PR — the window the open-PR gate cannot see. Both are omitempty so an
+	// entry with no claim serialises to nothing, and a pre-fix cursor file (no
+	// such keys) loads with an empty claim, so no migration is needed.
+	//
+	// A claim is cleared by convergence, by the appearance of an open update PR,
+	// or by the InFlightTTL backstop; it is written only by markPublished, so
+	// hand-authored "- reemit" repair tasks never carry one.
+	InFlightTarget string `json:"in_flight_target,omitempty"`
+	InFlightSince  string `json:"in_flight_since,omitempty"`
 }
 
 // LoadCursor reads cursor state from path.

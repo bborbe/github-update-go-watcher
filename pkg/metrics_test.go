@@ -116,6 +116,31 @@ var _ = Describe("Metrics", func() {
 			Fail("filter_skipped_total metric or auto_update_undecided label not found")
 		})
 
+		It("pre-initialises emission_in_flight to 0", func() {
+			pkg.NewMetrics(reg)
+
+			families, err := reg.Gather()
+			Expect(err).NotTo(HaveOccurred())
+			for _, f := range families {
+				if f.GetName() == "github_update_go_watcher_filter_skipped_total" {
+					for _, metric := range f.GetMetric() {
+						for _, label := range metric.GetLabel() {
+							if label.GetName() == "reason" &&
+								label.GetValue() == "emission_in_flight" {
+								Expect(metric.GetCounter().GetValue()).To(Equal(0.0))
+								return
+							}
+						}
+					}
+				}
+			}
+			Fail("filter_skipped_total metric or emission_in_flight label not found")
+		})
+
+		It("FilterSkipReasons contains emission_in_flight", func() {
+			Expect(pkg.FilterSkipReasons).To(ContainElement("emission_in_flight"))
+		})
+
 		It("two distinct registries both succeed (no package-level registration)", func() {
 			reg2 := prometheus.NewRegistry()
 			Expect(func() {

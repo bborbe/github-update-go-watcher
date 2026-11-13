@@ -35,7 +35,7 @@ Poll-primary, on its own interval — no dependency on Layer 1's signal for corr
 
 ## Status
 
-Implemented. Not yet deployed — deployment (Helm/`quant` chart wiring) is a separate step outside this repo. Once deployed, the binary watches `OWNER` for Go repos behind the current stable release and publishes `CreateTaskCommand` to Kafka on a 10-minute interval (configurable via `POLL_INTERVAL`). Forced scans available via `POST /trigger`.
+Implemented. Not yet deployed — deployment (the Helm chart in `bborbe/nuke`) is a separate step outside this repo. Once deployed, the binary watches `OWNER` for Go repos behind the current stable release and publishes `CreateTaskCommand` to Kafka on a 10-minute interval (configurable via `POLL_INTERVAL`). Forced scans available via `POST /trigger`.
 
 ## Environment variables
 
@@ -43,9 +43,10 @@ Implemented. Not yet deployed — deployment (Helm/`quant` chart wiring) is a se
 |---|---|---|---|
 | `OWNER` | yes | — | GitHub owner/org to scan (e.g. `bborbe`) |
 | `STAGE` | yes | — | Deployment stage (`dev`\|`prod`), stamped on every emitted task |
+| `TARGET_VAULT` | yes | — | Vault slug stamped on every emitted task (e.g. `openclaw`). The controller refuses an empty `target_vault` instead of falling back, so an unset value fails at startup rather than silently disabling the pipeline |
 | `KAFKA_BROKERS` | yes | — | Comma-separated list of Kafka brokers |
 | `REPO_ALLOWLIST` | no | empty (allow-all) | Comma-separated host-qualified repo allowlist (`github.com/owner/repo`); empty = allow-all within `OWNER` |
-| `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the `quant` Helm chart) |
+| `CURSOR_PATH` | no | `/data/cursor.json` | Persisted-memory path (mount a PVC here via the Helm chart in `bborbe/nuke`) |
 | `POLL_INTERVAL` | no | `10m` | Poll interval as a Go duration (e.g. `5m`, `1h`) |
 | `TOPIC_PREFIX` | no | empty | Kafka topic prefix for CQRS topic construction |
 | `LISTEN` | no | `:9090` | HTTP listen address |
@@ -79,6 +80,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `auto_update_undecided` | `.maintainer.yaml` is absent, has no `goUpdate:` section, has no `autoUpdate` key, or the key holds a non-boolean value — the owner has never answered. A decision task is filed once per repo (see [Decision task contract](#decision-task-contract)) |
 | `sha_unchanged` | Repo HEAD SHA and target Go version are both unchanged since the last successful cycle (not evaluated on forced cycles) |
 | `open_update_pr` | Repo has an open `fix/update-go-*` pull request — an update is already in flight, so no new task is emitted (always-on gate, spec 003) |
+| `emission_in_flight` | Repo was already emitted for the current target Go version and none of the four clearing events has occurred (convergence, an open `fix/update-go-*` PR, the 14-day backstop, or the emitted task no longer being able to progress — terminal, or parked at `human_review`). Evaluated before the filter chain, so a claimed repo reports this reason rather than `sha_unchanged` |
 
 ## Emitted task contract
 
@@ -162,3 +164,16 @@ This verifies the complete path that unit tests cannot reach: GitHub API → fil
 make test      # Run tests
 make precommit # Full development workflow
 ```
+
+## Build
+
+The image builds either on this machine or inside a cluster.
+
+```bash
+make build                                                   # local Docker daemon
+make build BUILD_TARGET=nukeprod REF=<40-char-sha> VERSION=<tag>  # Kubernetes Job in the cluster
+```
+
+`BUILD_TARGET` defaults to `local`; any other value names a cluster alias (`sun`, `nukedev`, `nukeprod`) or a kubectl context and builds inside that cluster through `hack/build-cluster.sh`. The cluster arm requires `VERSION` on the command line — the Makefile default is the newest release tag, and pushing that over a released image is irreversible.
+
+Both arms push `docker.io/bborbe/github-update-go-watcher`. `upload`, `clean` and `buca` are local-only and are refused for a cluster target; the cluster Job pushes from inside the cluster and leaves nothing on this host.
