@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.10.3
 
 - fix: **match the emission claim by repo, not by a SHA-derived task identifier.** The watcher derived the claim's identifier from its own cursor (`InFlightTarget` + `LastSeenHeadSHA`); a record's `task_identifier` is fixed at the SHA it was minted at. Those diverge whenever a record was re-pointed or created by another path, so the clear could never fire and the repo stayed `emission_in_flight` with a terminal record. Measured on prod: `bborbe/backup` was suppressed with its record already observed (`b220e13f…`) and zero publishes, the last survivor after v0.10.2 took the set from 17 → 1. Every record carries `repo: <owner>/<name>` in frontmatter, so the consumer now keys on that and the watcher passes `repo.String()`; an event with no `repo` frontmatter is ignored rather than keyed on something the watcher cannot reproduce. The once-per-claim-generation bound and the fresh-observation rule are unchanged.
 
