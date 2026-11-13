@@ -1241,6 +1241,24 @@ var _ = Describe("emission claim (spec 005)", func() {
 		))
 	})
 
+	// markPublished re-arms the entitlement for the identifier it writes, and
+	// consumePending runs later in the same cycle. If the identifier were still
+	// in that list the consumption would undo the re-arm and the claim would stay
+	// stuck — the defect the reviewer caught on the first version of this fix.
+	It("does not consume an entitlement it just re-armed", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		// HEAD unchanged, so the re-armed claim derives the SAME identifier as
+		// the one the clear appended — the stuck case this fix exists for.
+		ghClient.GetHeadSHAReturns(oldSHA, nil)
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(terminalClaims.RearmCallCount()).To(Equal(1))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
+			"the publish replaced the claim, so there is nothing left to consume")
+	})
+
 	It("a converged repo never consults the terminal store", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)

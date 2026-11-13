@@ -61,6 +61,18 @@ type TerminalClaims struct {
 	observeTxReturnsOnCall map[int]struct {
 		result1 error
 	}
+	RearmStub        func(context.Context, string) error
+	rearmMutex       sync.RWMutex
+	rearmArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	rearmReturns struct {
+		result1 error
+	}
+	rearmReturnsOnCall map[int]struct {
+		result1 error
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -313,6 +325,68 @@ func (fake *TerminalClaims) ObserveTxReturnsOnCall(i int, result1 error) {
 		})
 	}
 	fake.observeTxReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *TerminalClaims) Rearm(arg1 context.Context, arg2 string) error {
+	fake.rearmMutex.Lock()
+	ret, specificReturn := fake.rearmReturnsOnCall[len(fake.rearmArgsForCall)]
+	fake.rearmArgsForCall = append(fake.rearmArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.RearmStub
+	fakeReturns := fake.rearmReturns
+	fake.recordInvocation("Rearm", []interface{}{arg1, arg2})
+	fake.rearmMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *TerminalClaims) RearmCallCount() int {
+	fake.rearmMutex.RLock()
+	defer fake.rearmMutex.RUnlock()
+	return len(fake.rearmArgsForCall)
+}
+
+func (fake *TerminalClaims) RearmCalls(stub func(context.Context, string) error) {
+	fake.rearmMutex.Lock()
+	defer fake.rearmMutex.Unlock()
+	fake.RearmStub = stub
+}
+
+func (fake *TerminalClaims) RearmArgsForCall(i int) (context.Context, string) {
+	fake.rearmMutex.RLock()
+	defer fake.rearmMutex.RUnlock()
+	argsForCall := fake.rearmArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *TerminalClaims) RearmReturns(result1 error) {
+	fake.rearmMutex.Lock()
+	defer fake.rearmMutex.Unlock()
+	fake.RearmStub = nil
+	fake.rearmReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *TerminalClaims) RearmReturnsOnCall(i int, result1 error) {
+	fake.rearmMutex.Lock()
+	defer fake.rearmMutex.Unlock()
+	fake.RearmStub = nil
+	if fake.rearmReturnsOnCall == nil {
+		fake.rearmReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.rearmReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

@@ -58,6 +58,8 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 ## Non-goals
 
 - **`InFlightTTL` is not shortened.** It stays the 336h backstop for a claim whose task is still running (or whose non-progressing event was missed). This adds the missing signal; it does not retune the fallback.
+- **`status: hold` ends a claim.** A hold is a block with no scheduled resume date — nothing dispatches it and no clock brings it back — so a claim covering it freezes the repo for the whole `InFlightTTL`. Three repos (`backup`, `crypto`, `pr-review-fixtures`) were stuck on exactly this, measured 2026-11-13. Added after v0.9.1 shipped with terminal + `human_review` only.
+- **The once-per-task bound is per claim generation, not per process lifetime.** The clear re-arms a claim with the SAME identifier (a failed emission never moved HEAD), so a permanent bound froze the repo until restart: `lock` and `github-vuln-watcher` were skipped `emission_in_flight` 33 times in 3h with their records already observed and zero publishes. `markPublished` re-arms the entitlement for the identifier it writes, and drops it from that cycle's pending consume list — the re-arm would otherwise be undone by `consumePending`, which runs after `SaveCursor`.
 - **`phase: human_review` DOES end a claim, and that is deliberate.** A record parked there is owned by nobody ([[A github-update-go Record Routed to human_review Is Owned by Nobody]] closed, and 39 records are still parked), so treating it as live is what freezes the pipeline. It is not "terminal" in the state-machine sense — the distinction this spec draws is **dispatchability**, and the open-PR gate above it keeps a genuinely in-flight review suppressing.
 - **The open-PR gate, the `sha_unchanged` two-key rule, the task identity seed and the consent filters are unchanged.**
 - **No vault read, no task-store query, no new chart value, no new PVC.**
@@ -97,7 +99,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 - Do not change `InFlightTTL`, `DeriveTaskID`, `openUpdatePRGate`'s semantics, or `SHAUnchangedFilter`'s rule. The dedup-key drop happens in the cursor, not in the filter.
 - The cursor file must stay readable by an older binary — this change adds no field.
 - The consumer must never return on a recoverable error.
-- The non-progressing set is exactly two populations: a terminal status, and `phase: human_review`. Do not widen it to `hold`, `next` or `backlog` — those are waits the claim exists to cover.
+- The non-progressing set is exactly three populations: a terminal status, `status: hold` (a block with no scheduled resume date), and `phase: human_review`. Do not widen it to `next` or `backlog` — those are queued waits the claim exists to cover.
 - Ending a failed emission and clearing on convergence stay separate code paths: they differ in whether the dedup keys survive, and collapsing them would either lose the re-emit or clear dedup state on convergence.
 
 ## Failure Modes
@@ -111,7 +113,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 | Event topic unavailable | The consumer logs and retries; the poll loop keeps running with the TTL as its only backstop | Fix the broker; no state is lost because replay is from the oldest offset |
 | Malformed event payload | The handler is wrapped in a skip-errors sampler; the consumer keeps consuming | Nothing — one skipped event cannot wedge the loop |
 | Non-progressing event (`completed`, `aborted`, or `phase: human_review`) | Recorded; the next cycle may end the claim once | — |
-| Status event at a dispatchable phase (`in_progress`, `next`, `backlog`, `hold` at `planning`/`execution`/`ai_review`) | Ignored — the claim must survive a queued or running task | — |
+| Status event at a dispatchable phase (`in_progress`, `next`, `backlog` at `planning`/`execution`/`ai_review`) | Ignored — the claim must survive a queued or running task | — |
 | A `human_review` row whose update PR is open | The PR gate runs first: repo skipped `reason=open_update_pr`, claim cleared there; the new condition never sees it | — |
 | Delete event (empty payload) | Ignored explicitly | — |
 | A `- reemit` hand-authored task stops progressing | Its identifier is not a `DeriveTaskID` seed, so it can never match a claim | — |

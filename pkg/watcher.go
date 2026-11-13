@@ -225,7 +225,7 @@ func (w *watcher) processRepos(
 		}
 
 		if w.publisher.PublishCreate(ctx, candidate) {
-			w.markPublished(cursorState, repo, candidate)
+			w.markPublished(ctx, cursorState, repo, candidate)
 		}
 	}
 	return ""
@@ -241,7 +241,12 @@ func (w *watcher) processRepos(
 // task this cycle just filed. It also re-arms the emission claim for the cycle's
 // target version, so a repo that just got a task cannot get a second one while
 // that task is still queued.
-func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candidate) {
+func (w *watcher) markPublished(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+) {
 	if cursorState.Repos == nil {
 		cursorState.Repos = make(map[string]*RepoState)
 	}
@@ -256,6 +261,33 @@ func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candid
 		CompletedHeadSHA:  completedHeadSHA,
 		InFlightTarget:    candidate.LatestGo.Number(),
 		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
+	}
+	// Re-arm the entitlement for the identifier this claim now covers. The claim
+	// and the task identity are both derived from (target, HEAD), so a re-emit
+	// that did not move HEAD re-arms the SAME identifier — and its entitlement was
+	// spent by the clear that caused this publish. Without the re-arm that repo
+	// could never clear again.
+	if w.terminalClaims != nil {
+		taskID := DeriveTaskID(
+			repo.Owner,
+			repo.Name,
+			candidate.LatestGo.Number(),
+			candidate.HeadSHA,
+		).String()
+		if err := w.terminalClaims.Rearm(ctx, taskID); err != nil {
+			glog.Warningf(
+				"emission claim: rearm failed repo=%s taskID=%s err=%v",
+				repo.Key(),
+				taskID,
+				err,
+			)
+		}
+		// Drop this identifier from the pending consume list. The clear that
+		// caused this publish appended it, and consumePending runs AFTER
+		// SaveCursor — so without this the consumption re-writes the marker the
+		// re-arm just deleted and the claim is stuck exactly as before. Nothing
+		// is left to consume: the claim this identifier covered has been replaced.
+		w.dropPendingConsume(taskID)
 	}
 }
 
@@ -386,6 +418,20 @@ func (w *watcher) terminalEmission(
 		w.pendingTerminalConsume = append(w.pendingTerminalConsume, taskID)
 	}
 	return clearable
+}
+
+// dropPendingConsume removes taskID from this cycle's pending consume list.
+func (w *watcher) dropPendingConsume(taskID string) {
+	if len(w.pendingTerminalConsume) == 0 {
+		return
+	}
+	kept := w.pendingTerminalConsume[:0]
+	for _, id := range w.pendingTerminalConsume {
+		if id != taskID {
+			kept = append(kept, id)
+		}
+	}
+	w.pendingTerminalConsume = kept
 }
 
 // consumePending spends the entitlements for the claims this cycle cleared.

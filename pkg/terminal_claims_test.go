@@ -62,6 +62,28 @@ var _ = Describe("TerminalClaims", func() {
 		Expect(clearable).To(BeFalse())
 	})
 
+	It("re-arms a consumed entitlement", func() {
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		Expect(store.Consume(ctx, "task-1")).To(Succeed())
+		spent, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(spent).To(BeFalse())
+
+		// A re-emit that did not move HEAD re-arms a claim with the same
+		// identifier; without Rearm that claim could never be cleared again.
+		Expect(store.Rearm(ctx, "task-1")).To(Succeed())
+		// A re-arm requires a FRESH observation: without that the repo would
+		// re-emit every poll interval instead of once per terminal event.
+		clearable, err := store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(clearable).To(BeFalse(), "a re-armed claim waits for a new non-progressing event")
+
+		Expect(store.Observe(ctx, "task-1")).To(Succeed())
+		clearable, err = store.Clearable(ctx, "task-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(clearable).To(BeTrue())
+	})
+
 	It("tracks identifiers independently", func() {
 		Expect(store.Observe(ctx, "task-1")).To(Succeed())
 		Expect(store.Consume(ctx, "task-1")).To(Succeed())
