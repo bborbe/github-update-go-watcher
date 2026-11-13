@@ -282,6 +282,12 @@ func (w *watcher) markPublished(
 				err,
 			)
 		}
+		// Drop this identifier from the pending consume list. The clear that
+		// caused this publish appended it, and consumePending runs AFTER
+		// SaveCursor — so without this the consumption re-writes the marker the
+		// re-arm just deleted and the claim is stuck exactly as before. Nothing
+		// is left to consume: the claim this identifier covered has been replaced.
+		w.dropPendingConsume(taskID)
 	}
 }
 
@@ -412,6 +418,20 @@ func (w *watcher) terminalEmission(
 		w.pendingTerminalConsume = append(w.pendingTerminalConsume, taskID)
 	}
 	return clearable
+}
+
+// dropPendingConsume removes taskID from this cycle's pending consume list.
+func (w *watcher) dropPendingConsume(taskID string) {
+	if len(w.pendingTerminalConsume) == 0 {
+		return
+	}
+	kept := w.pendingTerminalConsume[:0]
+	for _, id := range w.pendingTerminalConsume {
+		if id != taskID {
+			kept = append(kept, id)
+		}
+	}
+	w.pendingTerminalConsume = kept
 }
 
 // consumePending spends the entitlements for the claims this cycle cleared.
