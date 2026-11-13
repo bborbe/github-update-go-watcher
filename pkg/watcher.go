@@ -268,17 +268,11 @@ func (w *watcher) markPublished(
 	// spent by the clear that caused this publish. Without the re-arm that repo
 	// could never clear again.
 	if w.terminalClaims != nil {
-		taskID := DeriveTaskID(
-			repo.Owner,
-			repo.Name,
-			candidate.LatestGo.Number(),
-			candidate.HeadSHA,
-		).String()
-		if err := w.terminalClaims.Rearm(ctx, taskID); err != nil {
+		repoKey := repo.String()
+		if err := w.terminalClaims.Rearm(ctx, repoKey); err != nil {
 			glog.Warningf(
-				"emission claim: rearm failed repo=%s taskID=%s err=%v",
+				"emission claim: rearm failed repo=%s err=%v",
 				repo.Key(),
-				taskID,
 				err,
 			)
 		}
@@ -287,7 +281,7 @@ func (w *watcher) markPublished(
 		// SaveCursor — so without this the consumption re-writes the marker the
 		// re-arm just deleted and the claim is stuck exactly as before. Nothing
 		// is left to consume: the claim this identifier covered has been replaced.
-		w.dropPendingConsume(taskID)
+		w.dropPendingConsume(repoKey)
 	}
 }
 
@@ -390,23 +384,21 @@ func clearFailedEmission(cursorState *Cursor, repoKey, target string) {
 func (w *watcher) terminalEmission(
 	ctx context.Context,
 	repo Repo,
-	state *RepoState,
 ) bool {
-	if w.terminalClaims == nil || state.LastSeenHeadSHA == "" {
+	if w.terminalClaims == nil {
 		return false
 	}
-	taskID := DeriveTaskID(
-		repo.Owner,
-		repo.Name,
-		state.InFlightTarget,
-		state.LastSeenHeadSHA,
-	).String()
-	clearable, err := w.terminalClaims.Clearable(ctx, taskID)
+	// Keyed by repo, matching the consumer. A derived identifier cannot be made
+	// to agree: the watcher derives from its cursor while the record's identifier
+	// is fixed at the SHA it was minted at, and those diverge whenever the record
+	// was re-pointed. `bborbe/backup` sat behind emission_in_flight with its
+	// record already observed for exactly this reason.
+	repoKey := repo.String()
+	clearable, err := w.terminalClaims.Clearable(ctx, repoKey)
 	if err != nil {
 		glog.Warningf(
-			"emission claim: read terminal state failed repo=%s taskID=%s err=%v",
+			"emission claim: read terminal state failed repo=%s err=%v",
 			repo.Key(),
-			taskID,
 			err,
 		)
 		return false
@@ -415,7 +407,7 @@ func (w *watcher) terminalEmission(
 		// Recorded, not spent: the entitlement is consumed only after the cursor
 		// save succeeds, so a rate-limited abort later in this cycle cannot lose
 		// the cursor write while keeping the consumption.
-		w.pendingTerminalConsume = append(w.pendingTerminalConsume, taskID)
+		w.pendingTerminalConsume = append(w.pendingTerminalConsume, repoKey)
 	}
 	return clearable
 }
@@ -554,7 +546,7 @@ func (w *watcher) emissionInFlight(
 	// Evaluated after the open-PR gate (gateRepo), so a human_review row whose
 	// update PR is open is already skipped reason=open_update_pr and its claim
 	// already cleared there — what reaches here is a parked row with no PR.
-	if w.terminalEmission(ctx, repo, state) {
+	if w.terminalEmission(ctx, repo) {
 		clearFailedEmission(cursorState, repo.Key(), target)
 		return false
 	}

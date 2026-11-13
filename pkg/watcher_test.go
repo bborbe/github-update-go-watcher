@@ -6,12 +6,16 @@ package pkg_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/IBM/sarama"
+	agentlib "github.com/bborbe/agent"
 	taskmocks "github.com/bborbe/agent/mocks"
+	libkv "github.com/bborbe/kv"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
@@ -1176,17 +1180,76 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(readRepoState().LastSeenHeadSHA).To(Equal(newSHA))
 	})
 
-	It("derives the claim's task identifier from the cursor, not a stored field", func() {
+	It("asks the terminal store by repo, not by a derived identifier", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
 		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
-		_, taskID := terminalClaims.ClearableArgsForCall(0)
-		Expect(taskID).To(Equal(
+		_, repoKey := terminalClaims.ClearableArgsForCall(0)
+		Expect(repoKey).To(Equal("bborbe/disk-status"))
+	})
+
+	// The defect this fix exists for: a record's task_identifier is fixed at the
+	// SHA it was minted at, while the watcher can only derive an identifier from
+	// its own cursor. A record minted at another SHA therefore never matches an
+	// identifier-keyed lookup and its claim is never cleared. This drives the
+	// REAL store through the REAL consumer handler and then a watcher cycle, so
+	// it fails on the identifier-keyed build (0 publishes) and passes on the
+	// repo-keyed one.
+	It("clears the claim for a record minted at a different SHA than the cursor holds", func() {
+		const mintedSHA = "cccc000000000000000000000000000000000000"
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		db := pkg.NewMemDB()
+		store := pkg.NewTerminalClaims(db)
+		mintedID := pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", mintedSHA).String()
+		// The identifier the identifier-keyed build would have derived from the
+		// cursor — deliberately not the one the record was minted at.
+		Expect(mintedID).NotTo(Equal(
 			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
 		))
+		payload, err := json.Marshal(agentlib.Task{
+			TaskIdentifier: agentlib.TaskIdentifier(mintedID),
+			Frontmatter: agentlib.TaskFrontmatter{
+				"status":    "completed",
+				"task_type": "github-update-go",
+				"repo":      "bborbe/disk-status",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(db.Update(context.Background(), func(ctx context.Context, tx libkv.Tx) error {
+			return pkg.NewTerminalClaimsMessageHandler(store).ConsumeMessage(
+				ctx,
+				tx,
+				&sarama.ConsumerMessage{Key: []byte(mintedID), Value: payload},
+			)
+		})).To(Succeed())
+
+		watcher = pkg.NewWatcher(
+			ghClient,
+			goDevClient,
+			publisher,
+			completeSender,
+			metrics,
+			cursorPath,
+			"bborbe",
+			filter.TaskCreationFilterList{
+				filter.NewRepoAllowlistFilter([]string{repoKey}),
+				filter.NewGoModPresentFilter(),
+				filter.NewGoModParsableFilter(),
+				filter.NewGoBehindFilter(),
+				filter.NewAutoUpdateFilter(),
+			},
+			currentDateTime,
+			store,
+		)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
 	})
 
 	It("a consumed entitlement keeps the claim", func() {
@@ -1234,17 +1297,16 @@ var _ = Describe("emission claim (spec 005)", func() {
 			"the cursor was never saved, so the entitlement must not be spent")
 	})
 
-	It("spends the entitlement once the cursor is saved", func() {
+	It("does not spend an entitlement whose publish replaced the claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
-		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
-		_, taskID := terminalClaims.ConsumeArgsForCall(0)
-		Expect(taskID).To(Equal(
-			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
-		))
+		// With repo keying, markPublished always re-arms the same key it cleared,
+		// so a successful publish never consumes: there is nothing left to spend,
+		// and the re-arm is what lets the claim clear again after a fresh event.
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0))
 	})
 
 	// markPublished re-arms the entitlement for the identifier it writes, and

@@ -74,15 +74,30 @@ func NewTerminalClaimsMessageHandler(claims TerminalClaims) libkafka.MessageHand
 			if !isNonProgressingTask(task) {
 				return nil
 			}
-			taskID := string(msg.Key)
+			// Key by REPO, not by task identifier. The watcher can only derive an
+			// identifier from its own cursor (InFlightTarget + LastSeenHeadSHA),
+			// and a record's identifier is fixed at the SHA it was minted at —
+			// which diverges whenever the record was re-pointed or created by
+			// another path. `bborbe/backup` was skipped emission_in_flight with
+			// its record already observed for exactly this reason: the derived
+			// identifier never equalled b220e13f… . The record carries its repo in
+			// frontmatter, so both sides can agree on that instead.
+			repoKey, ok := task.Frontmatter["repo"].(string)
+			if !ok || repoKey == "" {
+				glog.V(2).Infof(
+					"non-progressing task has no repo frontmatter, skipping taskID=%s",
+					string(msg.Key),
+				)
+				return nil
+			}
 			// ObserveTx, not Observe: this handler already runs inside
 			// db.Update, which holds the database's write lock, and the DB is not
 			// reentrant — opening a second Update here would deadlock on the
 			// first event.
-			if err := claims.ObserveTx(ctx, tx, taskID); err != nil {
-				return errors.Wrapf(ctx, err, "observe taskID=%s", taskID)
+			if err := claims.ObserveTx(ctx, tx, repoKey); err != nil {
+				return errors.Wrapf(ctx, err, "observe repo=%s", repoKey)
 			}
-			glog.V(2).Infof("non-progressing task observed taskID=%s", taskID)
+			glog.V(2).Infof("non-progressing task observed repo=%s", repoKey)
 			return nil
 		},
 	)
