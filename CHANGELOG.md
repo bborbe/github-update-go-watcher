@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: End the emission claim for `status: hold` records and re-arm it when a claim is re-written. A hold is a block with no scheduled resume date — nothing dispatches it and no clock brings it back — so a claim covering it froze the repo for the whole `InFlightTTL`. Separately, the once-per-task bound was permanent per process lifetime while the clear re-arms a claim with the same identifier (a failed emission never moved HEAD), so a repo could be skipped `emission_in_flight` indefinitely with its record already terminal: measured on prod 2026-11-13, two repos were skipped 33 times in 3h with zero publishes. A re-armed claim now requires a fresh non-progressing event before it can clear again, so the bound still holds within a claim generation without outliving the claim it bounds.
+
 ## v0.10.0
 
 - fix: Stamp `target_vault` on every emitted create-task and complete-task command. Both senders were built with an empty default vault and the task frontmatter never carried the field, so every command went out with an empty `target_vault` and the controller refused it at validation (`invalid target_vault … the producer must stamp the owning vault`) instead of falling back to its legacy default. The publish succeeded and nothing was written — measured on prod 2026-11-12: 23 publishes, 0 task files, invisible on the watcher side. `TARGET_VAULT` is now required, so an unset vault fails at startup rather than silently disabling the pipeline.
