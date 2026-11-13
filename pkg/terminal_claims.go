@@ -42,6 +42,18 @@ type TerminalClaims interface {
 	// the next pod restart.
 	Consume(ctx context.Context, taskID string) error
 
+	// Rearm clears the consumed marker for taskID, so a claim that is re-written
+	// for the same identifier can be ended again.
+	//
+	// Without this the bound is permanent per process lifetime: the first clear
+	// spends the entitlement, the re-emit re-arms a claim with the SAME identifier
+	// (a failed emission never moved HEAD), and that claim can never be cleared
+	// again — the repo stays frozen until the pod restarts. Measured on prod
+	// 2026-11-13: `lock` and `github-vuln-watcher` were skipped emission_in_flight
+	// 33 times in 3h with their terminal records already observed and zero
+	// publishes, because their entitlement had been spent.
+	Rearm(ctx context.Context, taskID string) error
+
 	// ObserveTx is Observe inside a caller-supplied transaction.
 	//
 	// A Kafka batch handler runs inside db.Update, which already holds the
@@ -107,6 +119,22 @@ func (c *terminalClaims) Consume(ctx context.Context, taskID string) error {
 		clearedKey := taskID + ":cleared"
 		if err := bucket.Put(ctx, []byte(clearedKey), terminalClaimMarker); err != nil {
 			return errors.Wrapf(ctx, err, "consume entitlement taskID=%s", taskID)
+		}
+		return nil
+	})
+}
+
+func (c *terminalClaims) Rearm(ctx context.Context, taskID string) error {
+	return c.db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
+		bucket, err := tx.Bucket(ctx, libkv.NewBucketName(terminalClaimsBucket))
+		if err != nil {
+			if stderrors.Is(err, libkv.ErrBucketNotFound) {
+				return nil
+			}
+			return errors.Wrapf(ctx, err, "open bucket %s", terminalClaimsBucket)
+		}
+		if err := bucket.Delete(ctx, []byte(taskID+":cleared")); err != nil {
+			return errors.Wrapf(ctx, err, "rearm taskID=%s", taskID)
 		}
 		return nil
 	})

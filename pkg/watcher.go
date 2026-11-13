@@ -225,7 +225,7 @@ func (w *watcher) processRepos(
 		}
 
 		if w.publisher.PublishCreate(ctx, candidate) {
-			w.markPublished(cursorState, repo, candidate)
+			w.markPublished(ctx, cursorState, repo, candidate)
 		}
 	}
 	return ""
@@ -241,7 +241,12 @@ func (w *watcher) processRepos(
 // task this cycle just filed. It also re-arms the emission claim for the cycle's
 // target version, so a repo that just got a task cannot get a second one while
 // that task is still queued.
-func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candidate) {
+func (w *watcher) markPublished(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+) {
 	if cursorState.Repos == nil {
 		cursorState.Repos = make(map[string]*RepoState)
 	}
@@ -256,6 +261,27 @@ func (w *watcher) markPublished(cursorState *Cursor, repo Repo, candidate Candid
 		CompletedHeadSHA:  completedHeadSHA,
 		InFlightTarget:    candidate.LatestGo.Number(),
 		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
+	}
+	// Re-arm the entitlement for the identifier this claim now covers. The claim
+	// and the task identity are both derived from (target, HEAD), so a re-emit
+	// that did not move HEAD re-arms the SAME identifier — and its entitlement was
+	// spent by the clear that caused this publish. Without the re-arm that repo
+	// could never clear again.
+	if w.terminalClaims != nil {
+		taskID := DeriveTaskID(
+			repo.Owner,
+			repo.Name,
+			candidate.LatestGo.Number(),
+			candidate.HeadSHA,
+		).String()
+		if err := w.terminalClaims.Rearm(ctx, taskID); err != nil {
+			glog.Warningf(
+				"emission claim: rearm failed repo=%s taskID=%s err=%v",
+				repo.Key(),
+				taskID,
+				err,
+			)
+		}
 	}
 }
 

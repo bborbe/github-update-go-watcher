@@ -30,8 +30,12 @@ func terminalClaimsTopic(prefix base.TopicPrefix) libkafka.Topic {
 
 // isNonProgressingTask reports whether no Config will dispatch task again.
 //
-// Two populations qualify:
+// Three populations qualify:
 //   - a terminal status (completed, aborted) — the task is over;
+//   - status hold — a hold is a block with no scheduled resume date (a vendor
+//     reply that may never come, a dependency not yet built). Nothing dispatches
+//     it and no clock brings it back, so a claim covering it freezes the repo for
+//     the whole InFlightTTL. Three repos were stuck on exactly this.
 //   - phase human_review — nothing dispatches it and a record cannot leave that
 //     phase on its own, so it is parked, not in flight. A record parked there is
 //     owned by nobody, and treating it as live is what freezes a repo for the
@@ -44,7 +48,7 @@ func terminalClaimsTopic(prefix base.TopicPrefix) libkafka.Topic {
 // nor parked and is ignored.
 func isNonProgressingTask(task agentlib.Task) bool {
 	switch task.Frontmatter.Status() {
-	case domain.TaskStatusCompleted, domain.TaskStatusAborted:
+	case domain.TaskStatusCompleted, domain.TaskStatusAborted, domain.TaskStatusHold:
 		return true
 	}
 	phase := task.Frontmatter.Phase()
