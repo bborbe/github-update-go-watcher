@@ -1183,10 +1183,8 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
 		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
-		_, taskID := terminalClaims.ClearableArgsForCall(0)
-		Expect(taskID).To(Equal(
-			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
-		))
+		_, repoKey := terminalClaims.ClearableArgsForCall(0)
+		Expect(repoKey).To(Equal("bborbe/disk-status"))
 	})
 
 	It("a consumed entitlement keeps the claim", func() {
@@ -1234,17 +1232,16 @@ var _ = Describe("emission claim (spec 005)", func() {
 			"the cursor was never saved, so the entitlement must not be spent")
 	})
 
-	It("spends the entitlement once the cursor is saved", func() {
+	It("does not spend an entitlement whose publish replaced the claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
 
-		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
-		_, taskID := terminalClaims.ConsumeArgsForCall(0)
-		Expect(taskID).To(Equal(
-			pkg.DeriveTaskID("bborbe", "disk-status", "1.27.2", oldSHA).String(),
-		))
+		// With repo keying, markPublished always re-arms the same key it cleared,
+		// so a successful publish never consumes: there is nothing left to spend,
+		// and the re-arm is what lets the claim clear again after a fresh event.
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0))
 	})
 
 	// markPublished re-arms the entitlement for the identifier it writes, and

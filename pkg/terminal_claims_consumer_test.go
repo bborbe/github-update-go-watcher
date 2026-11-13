@@ -23,6 +23,9 @@ import (
 // taskEvent marshals a real agentlib.Task, so a field or JSON-tag mismatch
 // cannot pass the way a hand-written fixture would.
 func taskEvent(taskID string, frontmatter agentlib.TaskFrontmatter) *sarama.ConsumerMessage {
+	if _, ok := frontmatter["repo"]; !ok {
+		frontmatter["repo"] = "bborbe/disk-status"
+	}
 	payload, err := json.Marshal(agentlib.Task{
 		TaskIdentifier: agentlib.TaskIdentifier(taskID),
 		Frontmatter:    frontmatter,
@@ -62,7 +65,7 @@ var _ = Describe("terminal claims consumer", func() {
 	DescribeTable("records only tasks that can no longer progress",
 		func(frontmatter agentlib.TaskFrontmatter, recorded bool) {
 			Expect(consume(taskEvent("task-1", frontmatter))).To(Succeed())
-			Expect(allowed("task-1")).To(Equal(recorded))
+			Expect(allowed("bborbe/disk-status")).To(Equal(recorded))
 		},
 		Entry("completed", agentlib.TaskFrontmatter{"status": "completed"}, true),
 		Entry("aborted", agentlib.TaskFrontmatter{"status": "aborted"}, true),
@@ -121,7 +124,7 @@ var _ = Describe("terminal claims consumer", func() {
 			Fail("handler deadlocked inside the batch transaction")
 		}
 
-		clearable, err := claimStore.Clearable(ctx, "task-1")
+		clearable, err := claimStore.Clearable(ctx, "bborbe/disk-status")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(clearable).To(BeTrue())
 	})
