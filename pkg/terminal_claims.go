@@ -133,8 +133,17 @@ func (c *terminalClaims) Rearm(ctx context.Context, taskID string) error {
 			}
 			return errors.Wrapf(ctx, err, "open bucket %s", terminalClaimsBucket)
 		}
+		// Delete BOTH keys. Dropping only :cleared would leave the identifier
+		// observed, so the very next cycle would find it clearable again and
+		// re-emit every poll interval — the unbounded loop spec 007 DB6 forbids.
+		// Requiring a fresh observation is what makes the bound real: a re-emit
+		// that produced a new task run re-observes it when that run ends, while a
+		// no-op re-emit (identity-identical, no new record) waits for the TTL.
 		if err := bucket.Delete(ctx, []byte(taskID+":cleared")); err != nil {
 			return errors.Wrapf(ctx, err, "rearm taskID=%s", taskID)
+		}
+		if err := bucket.Delete(ctx, []byte(taskID)); err != nil {
+			return errors.Wrapf(ctx, err, "rearm taskID=%s observed", taskID)
 		}
 		return nil
 	})

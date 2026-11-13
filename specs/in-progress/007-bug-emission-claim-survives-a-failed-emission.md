@@ -99,7 +99,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 - Do not change `InFlightTTL`, `DeriveTaskID`, `openUpdatePRGate`'s semantics, or `SHAUnchangedFilter`'s rule. The dedup-key drop happens in the cursor, not in the filter.
 - The cursor file must stay readable by an older binary — this change adds no field.
 - The consumer must never return on a recoverable error.
-- The non-progressing set is exactly two populations: a terminal status, and `phase: human_review`. Do not widen it to `hold`, `next` or `backlog` — those are waits the claim exists to cover.
+- The non-progressing set is exactly three populations: a terminal status, `status: hold` (a block with no scheduled resume date), and `phase: human_review`. Do not widen it to `next` or `backlog` — those are queued waits the claim exists to cover.
 - Ending a failed emission and clearing on convergence stay separate code paths: they differ in whether the dedup keys survive, and collapsing them would either lose the re-emit or clear dedup state on convergence.
 
 ## Failure Modes
@@ -113,7 +113,7 @@ A repo whose emission task can no longer progress — terminal, or parked where 
 | Event topic unavailable | The consumer logs and retries; the poll loop keeps running with the TTL as its only backstop | Fix the broker; no state is lost because replay is from the oldest offset |
 | Malformed event payload | The handler is wrapped in a skip-errors sampler; the consumer keeps consuming | Nothing — one skipped event cannot wedge the loop |
 | Non-progressing event (`completed`, `aborted`, or `phase: human_review`) | Recorded; the next cycle may end the claim once | — |
-| Status event at a dispatchable phase (`in_progress`, `next`, `backlog`, `hold` at `planning`/`execution`/`ai_review`) | Ignored — the claim must survive a queued or running task | — |
+| Status event at a dispatchable phase (`in_progress`, `next`, `backlog` at `planning`/`execution`/`ai_review`) | Ignored — the claim must survive a queued or running task | — |
 | A `human_review` row whose update PR is open | The PR gate runs first: repo skipped `reason=open_update_pr`, claim cleared there; the new condition never sees it | — |
 | Delete event (empty payload) | Ignored explicitly | — |
 | A `- reemit` hand-authored task stops progressing | Its identifier is not a `DeriveTaskID` seed, so it can never match a claim | — |
