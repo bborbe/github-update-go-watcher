@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: file Go-update decision records at phase human_review so UnreachablePhase stops firing on records no Config can claim
+
 ## v0.11.1
 
 - fix: **do not re-arm the emission claim for a re-emit that files nothing.** The identifier derives from `(target, HEAD)`, so a clear whose re-emit would land on the same HEAD produces an identity-identical create — the controller finds the existing record and does nothing, no new run exists to re-observe the repo, and the re-armed claim could then only be cleared by the 14-day `InFlightTTL`. That is a pure freeze against a parked record, not the per-generation bound the contract intended. The terminal branch now keeps the `sha_unchanged` dedup key when HEAD has not moved, so the repo is skipped as `sha_unchanged` instead of being re-emitted for nothing; `markPublished` likewise writes the dedup key and no claim for an identity-identical publish, which also stops a forced (trigger) cycle from re-arming one. The dedup keys still drop when HEAD moved, where the re-emit carries a new identifier and files a record that will run. Measured on prod 2026-11-14 on v0.10.3: `pr-review-fixtures`, `claude-wrapper`, `build-fix-canary-a` and `build-fix-canary-b` were skipped `emission_in_flight` in three consecutive cycles with `hold` records whose mtimes all predated their publish.

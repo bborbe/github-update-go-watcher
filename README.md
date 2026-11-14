@@ -122,7 +122,7 @@ The command's frontmatter carries exactly these ten keys:
 |---|---|
 | `task_type` | `github-update-go-decision` |
 | `assignee` | `bborbe` (never `github-update-go-agent` — this is a human decision, not agent work) |
-| `phase` | `planning` |
+| `phase` | `human_review` |
 | `status` | `in_progress` |
 | `stage` | `<STAGE>` (`dev` or `prod`) |
 | `task_identifier` | deterministic UUID5 derived from `(owner, repo)` only |
