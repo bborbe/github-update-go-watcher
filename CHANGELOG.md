@@ -11,6 +11,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 ## Unreleased
 
 - fix: file Go-update decision records at phase human_review so UnreachablePhase stops firing on records no Config can claim
+- docs: record the one-time phase move for decision records filed before this release — the `(owner, repo)`-keyed identifier makes a re-emit a no-op, so existing records are not rewritten
 
 ## v0.11.1
 
