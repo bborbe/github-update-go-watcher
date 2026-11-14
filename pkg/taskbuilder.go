@@ -125,7 +125,7 @@ func buildDecisionFrontmatter(
 	return agentlib.TaskFrontmatter{
 		"task_type":       "github-update-go-decision",
 		"assignee":        "bborbe",
-		"phase":           "planning",
+		"phase":           "human_review",
 		"status":          "in_progress",
 		"stage":           cfg.Stage,
 		"task_identifier": taskIDStr,

@@ -122,7 +122,7 @@ The command's frontmatter carries exactly these ten keys:
 |---|---|
 | `task_type` | `github-update-go-decision` |
 | `assignee` | `bborbe` (never `github-update-go-agent` — this is a human decision, not agent work) |
-| `phase` | `planning` |
+| `phase` | `human_review` |
 | `status` | `in_progress` |
 | `stage` | `<STAGE>` (`dev` or `prod`) |
 | `task_identifier` | deterministic UUID5 derived from `(owner, repo)` only |
@@ -132,6 +132,18 @@ The command's frontmatter carries exactly these ten keys:
 | `latest_go` | current stable three-part Go version (e.g. `1.26.6`) |
 
 Body: a short explanation plus both `.maintainer.yaml` answers (`autoUpdate: true` to opt in, `autoUpdate: false` to opt out) — either answer stops future decision tasks for that repo.
+
+### One-time migration for records already on the board
+
+Decision records used to rest at `phase: planning`, which the `UnreachablePhase` alert reports as a pair no executor Config accepts — and no Config ever will, because these records are human work. Decision records now rest at `phase: human_review`, which that alert excludes.
+
+Records already on the board are **not** rewritten by the next cycle: the identifier is `(owner, repo)`-keyed, so the re-emit is an identity-identical create and the controller treats it as a no-op. Each one has to be moved once, in place. Note the two names — this watcher stamps `TARGET_VAULT: openclaw`, which is the controller's vault name; the same vault is registered with `vault-cli` as `private-agent`, and `--vault openclaw` fails with `vault not found`.
+
+```bash
+vault-cli --vault private-agent task set "Go Update Decision <owner>-<repo>" phase human_review
+```
+
+The move is safe and permanent — a later identity-identical re-emit does not touch the file, so the phase stays where it was set. Answering the decision in `.maintainer.yaml` instead also stops the record being re-emitted, but leaves the existing record at `planning` and the alert firing, so do both.
 
 ## Endpoints
 

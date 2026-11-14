@@ -203,6 +203,11 @@ var _ = Describe("taskbuilder", func() {
 			Expect(cmd.Frontmatter["assignee"]).NotTo(Equal("github-update-go-agent"))
 		})
 
+		It("sets phase to human_review", func() {
+			cmd := pkg.BuildDecisionCommand(candidate, cfg)
+			Expect(cmd.Frontmatter["phase"]).To(Equal("human_review"))
+		})
+
 		It("has exactly 10 frontmatter keys", func() {
 			cmd := pkg.BuildDecisionCommand(candidate, cfg)
 			Expect(len(cmd.Frontmatter)).To(Equal(10))
