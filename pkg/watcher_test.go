@@ -1309,15 +1309,94 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0))
 	})
 
+	// A non-progressing record whose identifier the re-emit would NOT change. The
+	// clear must not re-arm a claim for it: the controller finds the existing record
+	// and does nothing, so no new run can ever re-observe the repo and the claim
+	// could only be cleared by the InFlightTTL. The dedup key survives, so the repo
+	// is skipped as sha_unchanged instead of being re-emitted for nothing.
+	It("a non-progressing task at an unchanged HEAD leaves no claim behind", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		// HEAD unchanged: the re-emit would derive the identifier of the record
+		// that is already parked.
+		ghClient.GetHeadSHAReturns(oldSHA, nil)
+		terminalClaims.ClearableReturns(true, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0),
+			"an identity-identical re-emit files nothing, so it is not published")
+		Expect(terminalClaims.RearmCallCount()).To(Equal(0),
+			"no new record exists to justify a re-armed claim")
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(readRepoState().InFlightSince).To(BeEmpty())
+		Expect(readRepoState().LastSeenHeadSHA).To(Equal(oldSHA),
+			"the dedup key survives: an emission did happen at this HEAD")
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(1.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1),
+			"the entitlement is spent, so the clear cannot repeat")
+
+		// The defect was a state that repeats every poll interval, so one cycle
+		// cannot show it is gone. A second cycle must still not publish, not re-arm
+		// and not clear again.
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(2.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
+	})
+
+	// The other half of the same distinction. Without it, a fix that skipped every
+	// re-arm would pass the test above while breaking the guard the claim exists
+	// for — a genuinely running task must keep its claim.
+	It("a task still able to progress at an unchanged HEAD keeps its claim", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+		ghClient.GetHeadSHAReturns(oldSHA, nil)
+		terminalClaims.ClearableReturns(false, nil)
+
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
+		Expect(readRepoState().InFlightSince).To(
+			Equal(now().Add(-libtime.Hour).Format(time.RFC3339)),
+		)
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
+	})
+
+	// A forced cycle omits SHAUnchangedFilter, so it can publish the same HEAD
+	// again. markPublished must still refuse the claim: the emission is
+	// identity-identical and nothing new was filed.
+	It("a forced re-emit of an unchanged HEAD writes no claim", func() {
+		writeCursorState(`{"last_seen_head_sha":"` + oldSHA + `",` +
+			`"last_seen_go_version":"1.27.2",` +
+			`"completed_head_sha":"` + oldSHA + `"}`)
+		ghClient.GetHeadSHAReturns(oldSHA, nil)
+
+		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
+
+		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
+		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
+		Expect(readRepoState().InFlightTarget).To(BeEmpty())
+		Expect(readRepoState().InFlightSince).To(BeEmpty())
+		Expect(readRepoState().LastSeenHeadSHA).To(Equal(oldSHA))
+		// The merge marker must survive the rebuilt state: with it wiped,
+		// LastSeenHeadSHA != CompletedHeadSHA and the merge-detection pass publishes
+		// a CompleteCommand for the very task this cycle just re-emitted.
+		Expect(readRepoState().CompletedHeadSHA).To(Equal(oldSHA))
+		Expect(completeSender.SendCommandCallCount()).To(Equal(0))
+	})
+
 	// markPublished re-arms the entitlement for the identifier it writes, and
 	// consumePending runs later in the same cycle. If the identifier were still
 	// in that list the consumption would undo the re-arm and the claim would stay
 	// stuck — the defect the reviewer caught on the first version of this fix.
 	It("does not consume an entitlement it just re-armed", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
-		// HEAD unchanged, so the re-armed claim derives the SAME identifier as
-		// the one the clear appended — the stuck case this fix exists for.
-		ghClient.GetHeadSHAReturns(oldSHA, nil)
+		// HEAD moved, so the re-emit carries a NEW identifier: a record that will
+		// run and be observed. That is the case a re-arm is for.
 		terminalClaims.ClearableReturns(true, nil)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())

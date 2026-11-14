@@ -255,12 +255,40 @@ func (w *watcher) markPublished(
 	if previous != nil {
 		completedHeadSHA = previous.CompletedHeadSHA
 	}
-	cursorState.Repos[repo.Key()] = &RepoState{
+	// An emission identical to the one the cursor already records cannot produce a
+	// new record WHILE THAT RECORD STILL EXISTS: the identifier derives from
+	// (target, HEAD) and neither moved, so the controller dedups and nothing runs.
+	// Writing a claim for it would re-create the 14-day freeze, so only the dedup
+	// key is recorded.
+	//
+	// The predicate is exactly SHAUnchangedFilter's, so no ordinary cycle can reach
+	// it — that cycle is stopped by the filter before it can publish the same HEAD
+	// twice. A forced (trigger) cycle omits the filter and is the path this guards.
+	//
+	// The narrowing this buys: a record that was observed non-progressing and then
+	// DELETED from the vault (the consumer ignores delete events, so the store still
+	// reports it) is no longer re-emitted automatically — the repo is skipped
+	// sha_unchanged until HEAD moves, a new Go release lands, or an operator files a
+	// `- reemit` record. Re-emitting instead is what froze four repos for 14 days,
+	// and the watcher has no vault access to tell the two cases apart.
+	identityNoop := previous != nil &&
+		previous.LastSeenHeadSHA == candidate.HeadSHA &&
+		previous.LastSeenGoVersion == candidate.LatestGo.Number()
+	state := &RepoState{
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
-		InFlightTarget:    candidate.LatestGo.Number(),
-		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
+	}
+	if !identityNoop {
+		state.InFlightTarget = candidate.LatestGo.Number()
+		state.InFlightSince = w.currentDateTimeGetter.Now().Format(time.RFC3339)
+	}
+	cursorState.Repos[repo.Key()] = state
+	if identityNoop {
+		// Nothing new was emitted, so there is no claim to re-arm. The pending
+		// consume is deliberately left in place: the clear that led here did happen,
+		// and the entitlement is what stops it repeating.
+		return
 	}
 	// Re-arm the entitlement for the identifier this claim now covers. The claim
 	// and the task identity are both derived from (target, HEAD), so a re-emit
@@ -354,11 +382,12 @@ func clearInFlight(cursorState *Cursor, repoKey, target string) {
 // clearFailedEmission drops the emission claim for repoKey when it targets
 // target, AND drops the sha_unchanged dedup keys.
 //
-// The dedup-key drop is required, not incidental. With the claim gone but
-// LastSeenHeadSHA intact, SHAUnchangedFilter still matches — the failed emission
-// did not move HEAD — and suppresses the very re-emit this path exists to
-// produce, making the whole condition inert. Treating the repo as never-emitted
-// is the correct state: the emission demonstrably produced nothing.
+// It is the re-emit path for a claim whose task died at a HEAD the repo has since
+// moved past. Treating the repo as never-emitted is correct there: the dead
+// emission produced nothing, and the new HEAD must not be suppressed by the old
+// one's dedup key. The same-HEAD case is the opposite and does NOT use this — its
+// re-emit would be identity-identical, so it keeps the dedup key via clearInFlight
+// and is skipped as sha_unchanged instead.
 // CompletedHeadSHA survives: it is the merge-detection marker, not a dedup key.
 func clearFailedEmission(cursorState *Cursor, repoKey, target string) {
 	state := cursorState.Repos[repoKey]
@@ -547,6 +576,32 @@ func (w *watcher) emissionInFlight(
 	// update PR is open is already skipped reason=open_update_pr and its claim
 	// already cleared there — what reaches here is a parked row with no PR.
 	if w.terminalEmission(ctx, repo) {
+		if candidate.HeadSHA == state.LastSeenHeadSHA {
+			// The re-emit this clear would cause is identity-identical. The task
+			// identifier derives from (target, HEAD), the claim only suppresses on
+			// the cycle's target, and HEAD has not moved — so the controller finds
+			// the existing record and does nothing. Nothing runs, so nothing can
+			// re-observe the repo, and a re-armed claim could only ever be cleared
+			// by the InFlightTTL: the 14-day freeze this branch exists to prevent.
+			//
+			// Drop the claim but KEEP the dedup key. The repo then falls through to
+			// the ordinary sha_unchanged skip, which is bounded in events — one skip
+			// per cycle, none of them a publish — and true, since an emission already
+			// happened at this HEAD. It re-evaluates as soon as HEAD or the target Go
+			// version moves.
+			//
+			// `cause=`, not `reason=`: spec 001 DB4 defines reason= as the closed set
+			// of skip labels, and this is a clear.
+			glog.V(2).Infof(
+				"emission claim dropped repo=%s cause=identity_noop",
+				repo.Key(),
+			)
+			clearInFlight(cursorState, repo.Key(), target)
+			return false
+		}
+		// HEAD moved past the dead emission, so the re-emit carries a new
+		// identifier and files a record that will actually run and be observed.
+		// Drop the dedup keys so the new HEAD is not suppressed by the old one.
 		clearFailedEmission(cursorState, repo.Key(), target)
 		return false
 	}
