@@ -21,13 +21,13 @@ jobs:
           cache: true
 
       - name: Install Trivy
+        # Trivy's official installer, not the deb repo: `apt-key` was removed on
+        # the ubuntu-26.04 runner image (2026-11-14, "sudo: 'apt-key': command not
+        # found"), and the deb repo has no `resolute` dist either way. The installer
+        # drops a static binary, so it is independent of the distro codename.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          wget -qO- https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
 
       - name: Run precommit checks
         run: make precommit
