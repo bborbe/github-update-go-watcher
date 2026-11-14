@@ -133,18 +133,17 @@ The command's frontmatter carries exactly these ten keys:
 
 Body: a short explanation plus both `.maintainer.yaml` answers (`autoUpdate: true` to opt in, `autoUpdate: false` to opt out) — either answer stops future decision tasks for that repo.
 
-### One-time migration for records filed before v0.12.0
+### One-time migration for records already on the board
 
-Decision records used to rest at `phase: planning`, which the `UnreachablePhase` alert reports as a pair no executor Config accepts — and no Config ever will, because these records are human work. Records filed from v0.12.0 onward rest at `phase: human_review`, which that alert excludes.
+Decision records used to rest at `phase: planning`, which the `UnreachablePhase` alert reports as a pair no executor Config accepts — and no Config ever will, because these records are human work. Decision records now rest at `phase: human_review`, which that alert excludes.
 
-Records already on the board are **not** rewritten by the next cycle: the identifier is `(owner, repo)`-keyed, so the re-emit is an identity-identical create and the controller treats it as a no-op. Each one has to be moved once, in place:
+Records already on the board are **not** rewritten by the next cycle: the identifier is `(owner, repo)`-keyed, so the re-emit is an identity-identical create and the controller treats it as a no-op. Each one has to be moved once, in place. Note the two names — this watcher stamps `TARGET_VAULT: openclaw`, which is the controller's vault name; the same vault is registered with `vault-cli` as `private-agent`, and `--vault openclaw` fails with `vault not found`.
 
 ```bash
 vault-cli --vault private-agent task set "Go Update Decision <owner>-<repo>" phase human_review
 ```
 
 The move is safe and permanent — a later identity-identical re-emit does not touch the file, so the phase stays where it was set. Answering the decision in `.maintainer.yaml` instead also stops the record being re-emitted, but leaves the existing record at `planning` and the alert firing, so do both.
-
 
 ## Endpoints
 
