@@ -1335,12 +1335,22 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
 		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1),
 			"the entitlement is spent, so the clear cannot repeat")
+
+		// The defect was a state that repeats every poll interval, so one cycle
+		// cannot show it is gone. A second cycle must still not publish, not re-arm
+		// and not clear again.
+		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
+		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
+		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
+		Expect(filterSkippedValue("sha_unchanged")).To(Equal(2.0))
+		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
 	})
 
 	// The other half of the same distinction. Without it, a fix that skipped every
 	// re-arm would pass the test above while breaking the guard the claim exists
 	// for — a genuinely running task must keep its claim.
-	It("a task still able to progress keeps its claim", func() {
+	It("a task still able to progress at an unchanged HEAD keeps its claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetHeadSHAReturns(oldSHA, nil)
 		terminalClaims.ClearableReturns(false, nil)
@@ -1361,7 +1371,8 @@ var _ = Describe("emission claim (spec 005)", func() {
 	// identity-identical and nothing new was filed.
 	It("a forced re-emit of an unchanged HEAD writes no claim", func() {
 		writeCursorState(`{"last_seen_head_sha":"` + oldSHA + `",` +
-			`"last_seen_go_version":"1.27.2"}`)
+			`"last_seen_go_version":"1.27.2",` +
+			`"completed_head_sha":"` + oldSHA + `"}`)
 		ghClient.GetHeadSHAReturns(oldSHA, nil)
 
 		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
@@ -1371,6 +1382,11 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(readRepoState().InFlightTarget).To(BeEmpty())
 		Expect(readRepoState().InFlightSince).To(BeEmpty())
 		Expect(readRepoState().LastSeenHeadSHA).To(Equal(oldSHA))
+		// The merge marker must survive the rebuilt state: with it wiped,
+		// LastSeenHeadSHA != CompletedHeadSHA and the merge-detection pass publishes
+		// a CompleteCommand for the very task this cycle just re-emitted.
+		Expect(readRepoState().CompletedHeadSHA).To(Equal(oldSHA))
+		Expect(completeSender.SendCommandCallCount()).To(Equal(0))
 	})
 
 	// markPublished re-arms the entitlement for the identifier it writes, and

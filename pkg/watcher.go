@@ -256,11 +256,21 @@ func (w *watcher) markPublished(
 		completedHeadSHA = previous.CompletedHeadSHA
 	}
 	// An emission identical to the one the cursor already records cannot produce a
-	// new record: the identifier derives from (target, HEAD) and neither moved, so
-	// the controller dedups and nothing runs. Writing a claim for it would re-create
-	// the 14-day freeze, so only the dedup key is recorded. A forced (trigger) cycle
-	// is the one path that reaches this — the ordinary cycle is already stopped by
-	// SHAUnchangedFilter before it can publish the same HEAD twice.
+	// new record WHILE THAT RECORD STILL EXISTS: the identifier derives from
+	// (target, HEAD) and neither moved, so the controller dedups and nothing runs.
+	// Writing a claim for it would re-create the 14-day freeze, so only the dedup
+	// key is recorded.
+	//
+	// The predicate is exactly SHAUnchangedFilter's, so no ordinary cycle can reach
+	// it — that cycle is stopped by the filter before it can publish the same HEAD
+	// twice. A forced (trigger) cycle omits the filter and is the path this guards.
+	//
+	// The narrowing this buys: a record that was observed non-progressing and then
+	// DELETED from the vault (the consumer ignores delete events, so the store still
+	// reports it) is no longer re-emitted automatically — the repo is skipped
+	// sha_unchanged until HEAD moves, a new Go release lands, or an operator files a
+	// `- reemit` record. Re-emitting instead is what froze four repos for 14 days,
+	// and the watcher has no vault access to tell the two cases apart.
 	identityNoop := previous != nil &&
 		previous.LastSeenHeadSHA == candidate.HeadSHA &&
 		previous.LastSeenGoVersion == candidate.LatestGo.Number()
@@ -268,12 +278,10 @@ func (w *watcher) markPublished(
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
-		InFlightTarget:    candidate.LatestGo.Number(),
-		InFlightSince:     w.currentDateTimeGetter.Now().Format(time.RFC3339),
 	}
-	if identityNoop {
-		state.InFlightTarget = ""
-		state.InFlightSince = ""
+	if !identityNoop {
+		state.InFlightTarget = candidate.LatestGo.Number()
+		state.InFlightSince = w.currentDateTimeGetter.Now().Format(time.RFC3339)
 	}
 	cursorState.Repos[repo.Key()] = state
 	if identityNoop {
@@ -577,13 +585,16 @@ func (w *watcher) emissionInFlight(
 			// by the InFlightTTL: the 14-day freeze this branch exists to prevent.
 			//
 			// Drop the claim but KEEP the dedup key. The repo then falls through to
-			// the ordinary sha_unchanged skip, which is bounded and true — an
-			// emission already happened at this HEAD — and it re-evaluates as soon
-			// as HEAD or the target Go version moves.
+			// the ordinary sha_unchanged skip, which is bounded in events — one skip
+			// per cycle, none of them a publish — and true, since an emission already
+			// happened at this HEAD. It re-evaluates as soon as HEAD or the target Go
+			// version moves.
+			//
+			// `cause=`, not `reason=`: spec 001 DB4 defines reason= as the closed set
+			// of skip labels, and this is a clear.
 			glog.V(2).Infof(
-				"emission claim dropped without re-emit repo=%s reason=%s",
+				"emission claim dropped repo=%s cause=identity_noop",
 				repo.Key(),
-				"non_progressing_identity_noop",
 			)
 			clearInFlight(cursorState, repo.Key(), target)
 			return false
