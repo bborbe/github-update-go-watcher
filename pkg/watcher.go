@@ -43,6 +43,9 @@ type Watcher interface {
 // currentDateTimeGetter is the cycle's clock, used to stamp the emission
 // claim's InFlightSince; it is injected rather than read from the system clock
 // so the recorded time is deterministic under test.
+//
+// claims is the in-process task-lifecycle store. The consumer feeds it; this
+// watcher only reads whether a repo's emitted task can no longer progress.
 func NewWatcher(
 	ghClient GitHubClient,
 	goDevClient GoDevClient,
@@ -52,8 +55,8 @@ func NewWatcher(
 	cursorPath string,
 	owner string,
 	taskCreationFilter filter.TaskCreationFilter,
+	claims TerminalClaimsStore,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
-	terminalClaims TerminalClaims,
 ) Watcher {
 	return &watcher{
 		ghClient:              ghClient,
@@ -64,8 +67,8 @@ func NewWatcher(
 		cursorPath:            cursorPath,
 		owner:                 owner,
 		taskCreationFilter:    taskCreationFilter,
+		claims:                claims,
 		currentDateTimeGetter: currentDateTimeGetter,
-		terminalClaims:        terminalClaims,
 	}
 }
 
@@ -78,16 +81,17 @@ type watcher struct {
 	cursorPath            string
 	owner                 string
 	taskCreationFilter    filter.TaskCreationFilter
+	claims                TerminalClaimsStore
 	currentDateTimeGetter libtime.CurrentDateTimeGetter
-	terminalClaims        TerminalClaims
-	// pendingTerminalConsume holds the task identifiers this cycle cleared a
-	// claim for. Their entitlements are spent only after the cursor save
-	// succeeds — see consumePending.
-	pendingTerminalConsume []string
 }
 
+// pendingConsume is the set of repos whose terminal-claims entitlement this
+// cycle ended a claim for. It is consumed only after SaveCursor succeeds, so an
+// aborted cycle (a rate limit returns before the save) does not burn an
+// entitlement whose clear was discarded.
+type pendingConsume map[string]struct{}
+
 func (w *watcher) Poll(ctx context.Context, force bool) error {
-	w.pendingTerminalConsume = nil
 	cursorState, err := LoadCursor(ctx, w.cursorPath)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "load cursor path=%s", w.cursorPath)
@@ -129,7 +133,8 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 		)
 	}
 
-	abortReason := w.processRepos(ctx, cursorState, repos, cycleFilter, latestGo)
+	pending := pendingConsume{}
+	abortReason := w.processRepos(ctx, cursorState, repos, cycleFilter, latestGo, pending)
 	if abortReason != "" {
 		w.metrics.IncPollCycle(abortReason)
 		return nil
@@ -147,7 +152,7 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 		if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
 			glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
 		} else {
-			w.consumePending(ctx)
+			w.consumePending(ctx, pending)
 		}
 		return nil
 	}
@@ -155,7 +160,7 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 	if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
 		glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
 	} else {
-		w.consumePending(ctx)
+		w.consumePending(ctx, pending)
 	}
 
 	w.metrics.IncPollCycle("success")
@@ -168,6 +173,7 @@ func (w *watcher) processRepos(
 	repos []Repo,
 	cycleFilter filter.TaskCreationFilter,
 	latestGo Version,
+	pending pendingConsume,
 ) string {
 	for _, repo := range repos {
 		select {
@@ -196,7 +202,7 @@ func (w *watcher) processRepos(
 			continue
 		}
 
-		if w.suppressInFlight(ctx, cursorState, repo, candidate) {
+		if w.suppressInFlight(ctx, cursorState, repo, candidate, pending) {
 			continue
 		}
 
@@ -225,7 +231,7 @@ func (w *watcher) processRepos(
 		}
 
 		if w.publisher.PublishCreate(ctx, candidate) {
-			w.markPublished(ctx, cursorState, repo, candidate)
+			w.markPublished(ctx, cursorState, repo, candidate, pending)
 		}
 	}
 	return ""
@@ -233,19 +239,23 @@ func (w *watcher) processRepos(
 
 // markPublished records a successful publish in the cursor: the repo's HEAD,
 // the cycle's resolved target Go version (the same value the emitted task
-// carries as latest_go, so the recorded key and the filed identifier agree by
-// construction), and the prior completion marker carried forward. The marker
-// must survive: this cycle's merge-detection pass runs right after processRepos
-// and is suppressed only by LastSeenHeadSHA == CompletedHeadSHA, so a fresh
-// RepoState would wipe it and the pass would publish a CompleteCommand for the
-// task this cycle just filed. It also re-arms the emission claim for the cycle's
-// target version, so a repo that just got a task cannot get a second one while
-// that task is still queued.
+// carries as latest_go), and the prior completion marker carried forward. The
+// marker must survive: this cycle's merge-detection pass runs right after
+// processRepos and is suppressed only by LastSeenHeadSHA == CompletedHeadSHA,
+// so a fresh RepoState would wipe it and the pass would publish a CompleteCommand
+// for the task this cycle just filed.
+//
+// An identity-identical publish (same HEAD and target as the cursor already
+// records) files nothing new: it writes the dedup keys and no claim, so a
+// forced cycle cannot re-create a claim the ordinary cycle would never write.
+// Otherwise the publish carries a new identifier, so it writes a fresh claim and
+// re-arms the terminal-claims entitlement for that claim generation.
 func (w *watcher) markPublished(
 	ctx context.Context,
 	cursorState *Cursor,
 	repo Repo,
 	candidate Candidate,
+	pending pendingConsume,
 ) {
 	if cursorState.Repos == nil {
 		cursorState.Repos = make(map[string]*RepoState)
@@ -255,62 +265,31 @@ func (w *watcher) markPublished(
 	if previous != nil {
 		completedHeadSHA = previous.CompletedHeadSHA
 	}
-	// An emission identical to the one the cursor already records cannot produce a
-	// new record WHILE THAT RECORD STILL EXISTS: the identifier derives from
-	// (target, HEAD) and neither moved, so the controller dedups and nothing runs.
-	// Writing a claim for it would re-create the 14-day freeze, so only the dedup
-	// key is recorded.
-	//
-	// The predicate is exactly SHAUnchangedFilter's, so no ordinary cycle can reach
-	// it — that cycle is stopped by the filter before it can publish the same HEAD
-	// twice. A forced (trigger) cycle omits the filter and is the path this guards.
-	//
-	// The narrowing this buys: a record that was observed non-progressing and then
-	// DELETED from the vault (the consumer ignores delete events, so the store still
-	// reports it) is no longer re-emitted automatically — the repo is skipped
-	// sha_unchanged until HEAD moves, a new Go release lands, or an operator files a
-	// `- reemit` record. Re-emitting instead is what froze four repos for 14 days,
-	// and the watcher has no vault access to tell the two cases apart.
-	identityNoop := previous != nil &&
+	// An identity-identical publish (same HEAD and target as the cursor already
+	// records) files nothing new: write the dedup keys and no claim, so a forced
+	// cycle cannot re-create a claim the ordinary cycle would never write.
+	identityIdentical := previous != nil &&
 		previous.LastSeenHeadSHA == candidate.HeadSHA &&
 		previous.LastSeenGoVersion == candidate.LatestGo.Number()
-	state := &RepoState{
+
+	next := &RepoState{
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
 	}
-	if !identityNoop {
-		state.InFlightTarget = candidate.LatestGo.Number()
-		state.InFlightSince = w.currentDateTimeGetter.Now().Format(time.RFC3339)
+	if !identityIdentical {
+		next.InFlightTarget = candidate.LatestGo.Number()
+		next.InFlightSince = w.currentDateTimeGetter.Now().Format(time.RFC3339)
 	}
-	cursorState.Repos[repo.Key()] = state
-	if identityNoop {
-		// Nothing new was emitted, so there is no claim to re-arm. The pending
-		// consume is deliberately left in place: the clear that led here did happen,
-		// and the entitlement is what stops it repeating.
+	cursorState.Repos[repo.Key()] = next
+
+	if identityIdentical {
 		return
 	}
-	// Re-arm the entitlement for the identifier this claim now covers. The claim
-	// and the task identity are both derived from (target, HEAD), so a re-emit
-	// that did not move HEAD re-arms the SAME identifier — and its entitlement was
-	// spent by the clear that caused this publish. Without the re-arm that repo
-	// could never clear again.
-	if w.terminalClaims != nil {
-		repoKey := repo.String()
-		if err := w.terminalClaims.Rearm(ctx, repoKey); err != nil {
-			glog.Warningf(
-				"emission claim: rearm failed repo=%s err=%v",
-				repo.Key(),
-				err,
-			)
-		}
-		// Drop this identifier from the pending consume list. The clear that
-		// caused this publish appended it, and consumePending runs AFTER
-		// SaveCursor — so without this the consumption re-writes the marker the
-		// re-arm just deleted and the claim is stuck exactly as before. Nothing
-		// is left to consume: the claim this identifier covered has been replaced.
-		w.dropPendingConsume(repoKey)
+	if err := w.claims.Rearm(ctx, repo.String()); err != nil {
+		glog.Warningf("terminal-claims rearm failed repo=%s err=%v", repo.Key(), err)
 	}
+	delete(pending, repo.String())
 }
 
 // InFlightTTL is the backstop for an emission claim whose task never opened a
@@ -400,77 +379,17 @@ func clearFailedEmission(cursorState *Cursor, repoKey, target string) {
 	state.LastSeenGoVersion = ""
 }
 
-// terminalEmission reports whether the emission claim's own task can no longer
-// progress, consuming the entitlement to end the claim for it.
-//
-// The identifier is derived, not stored: markPublished writes LastSeenHeadSHA,
-// LastSeenGoVersion and InFlightTarget in one assignment from the same
-// candidate, and a live claim suppresses every later publish, so no later write
-// can move LastSeenHeadSHA out from under a live claim.
-//
-// An empty LastSeenHeadSHA yields no identifier, and a store fault returns
-// false — a store error must never end a claim.
-func (w *watcher) terminalEmission(
-	ctx context.Context,
-	repo Repo,
-) bool {
-	if w.terminalClaims == nil {
-		return false
-	}
-	// Keyed by repo, matching the consumer. A derived identifier cannot be made
-	// to agree: the watcher derives from its cursor while the record's identifier
-	// is fixed at the SHA it was minted at, and those diverge whenever the record
-	// was re-pointed. `bborbe/backup` sat behind emission_in_flight with its
-	// record already observed for exactly this reason.
-	repoKey := repo.String()
-	clearable, err := w.terminalClaims.Clearable(ctx, repoKey)
-	if err != nil {
-		glog.Warningf(
-			"emission claim: read terminal state failed repo=%s err=%v",
-			repo.Key(),
-			err,
-		)
-		return false
-	}
-	if clearable {
-		// Recorded, not spent: the entitlement is consumed only after the cursor
-		// save succeeds, so a rate-limited abort later in this cycle cannot lose
-		// the cursor write while keeping the consumption.
-		w.pendingTerminalConsume = append(w.pendingTerminalConsume, repoKey)
-	}
-	return clearable
-}
-
-// dropPendingConsume removes taskID from this cycle's pending consume list.
-func (w *watcher) dropPendingConsume(taskID string) {
-	if len(w.pendingTerminalConsume) == 0 {
-		return
-	}
-	kept := w.pendingTerminalConsume[:0]
-	for _, id := range w.pendingTerminalConsume {
-		if id != taskID {
-			kept = append(kept, id)
-		}
-	}
-	w.pendingTerminalConsume = kept
-}
-
 // consumePending spends the entitlements for the claims this cycle cleared.
 // Called only after SaveCursor succeeded. A failure is logged and the
 // entitlement stays unspent, which fails open — the next cycle clears again and
 // the duplicate emission is absorbed downstream by the deterministic task
 // identifier.
-func (w *watcher) consumePending(ctx context.Context) {
-	for _, taskID := range w.pendingTerminalConsume {
-		if err := w.terminalClaims.Consume(ctx, taskID); err != nil {
-			glog.Warningf(
-				"emission claim: consume entitlement failed taskID=%s err=%v",
-				taskID,
-				err,
-			)
+func (w *watcher) consumePending(ctx context.Context, pending pendingConsume) {
+	for repo := range pending {
+		if err := w.claims.Consume(ctx, repo); err != nil {
+			glog.Warningf("terminal-claims consume failed repo=%s err=%v", repo, err)
 		}
 	}
-	w.pendingTerminalConsume = nil
 }
 
 // inFlightExpired reports whether the claim is past InFlightTTL. An unparsable
@@ -524,8 +443,9 @@ func (w *watcher) suppressInFlight(
 	cursorState *Cursor,
 	repo Repo,
 	candidate Candidate,
+	pending pendingConsume,
 ) bool {
-	if !w.emissionInFlight(ctx, cursorState, repo, candidate) {
+	if !w.emissionInFlight(ctx, cursorState, repo, candidate, pending) {
 		return false
 	}
 	w.metrics.IncFilterSkipped("emission_in_flight")
@@ -552,6 +472,7 @@ func (w *watcher) emissionInFlight(
 	cursorState *Cursor,
 	repo Repo,
 	candidate Candidate,
+	pending pendingConsume,
 ) bool {
 	target := candidate.LatestGo.Number()
 	state := cursorState.Repos[repo.Key()]
@@ -566,43 +487,21 @@ func (w *watcher) emissionInFlight(
 		clearInFlight(cursorState, repo.Key(), target)
 		return false
 	}
-	// The emission's task can no longer progress — it is terminal, or parked at
-	// phase human_review where no Config dispatches it. Neither the convergence
-	// branch above nor the TTL backstop below can see that: the repo is still
-	// behind, and the claim is not yet 14 days old. Without this branch a failed
-	// emission freezes its repo for the whole InFlightTTL.
-	//
-	// Evaluated after the open-PR gate (gateRepo), so a human_review row whose
-	// update PR is open is already skipped reason=open_update_pr and its claim
-	// already cleared there — what reaches here is a parked row with no PR.
-	if w.terminalEmission(ctx, repo) {
-		if candidate.HeadSHA == state.LastSeenHeadSHA {
-			// The re-emit this clear would cause is identity-identical. The task
-			// identifier derives from (target, HEAD), the claim only suppresses on
-			// the cycle's target, and HEAD has not moved — so the controller finds
-			// the existing record and does nothing. Nothing runs, so nothing can
-			// re-observe the repo, and a re-armed claim could only ever be cleared
-			// by the InFlightTTL: the 14-day freeze this branch exists to prevent.
-			//
-			// Drop the claim but KEEP the dedup key. The repo then falls through to
-			// the ordinary sha_unchanged skip, which is bounded in events — one skip
-			// per cycle, none of them a publish — and true, since an emission already
-			// happened at this HEAD. It re-evaluates as soon as HEAD or the target Go
-			// version moves.
-			//
-			// `cause=`, not `reason=`: spec 001 DB4 defines reason= as the closed set
-			// of skip labels, and this is a clear.
-			glog.V(2).Infof(
-				"emission claim dropped repo=%s cause=identity_noop",
-				repo.Key(),
-			)
+	// Fifth condition: the emitted task can no longer progress (terminal, hold,
+	// or human_review), as observed by the task lifecycle consumer. A store read
+	// failure leaves the claim intact and keeps suppressing.
+	canConsume, err := w.claims.CanConsume(ctx, repo.String())
+	if err != nil {
+		glog.Warningf("terminal-claims read failed repo=%s err=%v", repo.Key(), err)
+		return true
+	}
+	if canConsume {
+		if candidate.HeadSHA != state.LastSeenHeadSHA {
+			clearFailedEmission(cursorState, repo.Key(), target)
+		} else {
 			clearInFlight(cursorState, repo.Key(), target)
-			return false
 		}
-		// HEAD moved past the dead emission, so the re-emit carries a new
-		// identifier and files a record that will actually run and be observed.
-		// Drop the dedup keys so the new HEAD is not suppressed by the old one.
-		clearFailedEmission(cursorState, repo.Key(), target)
+		pending[repo.String()] = struct{}{}
 		return false
 	}
 	if inFlightExpired(ctx, state, w.currentDateTimeGetter.Now()) {

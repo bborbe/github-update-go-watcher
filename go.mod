@@ -19,7 +19,6 @@ require (
 	github.com/bborbe/service v1.11.2
 	github.com/bborbe/time v1.27.25
 	github.com/bborbe/validation v1.5.8
-	github.com/bborbe/vault-cli v0.186.1
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/golang/glog v1.2.5
 	github.com/google/go-github/v84 v84.0.0
@@ -39,6 +38,7 @@ require (
 	github.com/bborbe/math v1.4.18 // indirect
 	github.com/bborbe/parse v1.12.5 // indirect
 	github.com/bborbe/strimzi v1.8.23 // indirect
+	github.com/bborbe/vault-cli v0.186.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

@@ -15,6 +15,7 @@ import (
 	libhttp "github.com/bborbe/http"
 	"github.com/bborbe/kafka"
 	"github.com/bborbe/log"
+	"github.com/bborbe/run"
 	libsentry "github.com/bborbe/sentry"
 	libtime "github.com/bborbe/time"
 	"github.com/gorilla/mux"
@@ -127,8 +128,8 @@ func CreateWatcher(
 	stage string,
 	updateScope string,
 	taskCreationFilter filter.TaskCreationFilter,
+	claims pkg.TerminalClaimsStore,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
-	terminalClaims pkg.TerminalClaims,
 ) pkg.Watcher {
 	ghClient := pkg.NewGitHubClient(githubHTTPClient)
 	goDevClient := pkg.NewGoDevClient(goDevHTTPClient, pkg.DefaultGoDevURL)
@@ -145,9 +146,39 @@ func CreateWatcher(
 		cursorPath,
 		owner,
 		taskCreationFilter,
+		claims,
 		currentDateTimeGetter,
-		terminalClaims,
 	)
+}
+
+// NewTerminalClaimsConsumer builds the task lifecycle event consumer as a
+// run.Func. It subscribes to the task event topic derived from the schema id and
+// the configured prefix, records non-progressing repos in the in-process store,
+// and never returns on a recoverable error.
+func NewTerminalClaimsConsumer(
+	saramaClientProvider kafka.SaramaClientProvider,
+	topicPrefix base.TopicPrefix,
+	claims pkg.TerminalClaimsStore,
+) run.Func {
+	consumer := kafka.NewOffsetConsumerHighwaterMarksBatchWithProvider(
+		saramaClientProvider,
+		pkg.TerminalClaimsEventTopic(topicPrefix),
+		kafka.NewStoreOffsetManager(
+			kafka.NewOffsetStore(pkg.NewMemoryDB()),
+			kafka.OffsetOldest,
+			kafka.OffsetNewest,
+		),
+		kafka.NewMessageHandlerBatch(
+			kafka.NewMessageHandlerSkipErrors(
+				pkg.NewTerminalClaimsHandler(claims),
+				log.DefaultSamplerFactory,
+			),
+		),
+		kafka.BatchSize(1),
+		run.NewTrigger(),
+		log.DefaultSamplerFactory,
+	)
+	return pkg.RunTerminalClaimsConsumer(consumer.Consume, pkg.TerminalClaimsRetryDelay)
 }
 
 // CreateTriggerHandler wraps the forced-cycle handler in an http.Handler

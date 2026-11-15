@@ -104,33 +104,21 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		}
 	}()
 
-	metrics := pkg.NewMetrics(nil)
-	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix, a.TargetVault)
-	completeSender := factory.CreateKafkaCompleteSender(syncProducer, a.TopicPrefix, a.TargetVault)
+	claims := pkg.NewInMemoryTerminalClaimsStore()
 	currentDateTime := libtime.NewCurrentDateTime()
-	// In-process kv DB: the offset store and the terminal-claims store. A
-	// restart replays the event topic from its oldest offset, which is safe (the
-	// emitted task identifier is a deterministic UUID5) and useful (the replay
-	// rebuilds the non-progressing set from history).
+	// The task-lifecycle consumer's offset state is in-process, so a restart
+	// replays the event topic from its oldest offset. That is safe (the emitted
+	// task identifier is a deterministic UUID5) and useful: the replay rebuilds
+	// the non-progressing set from history.
 	saramaClientProvider := kafka.NewSaramaClientProviderNew(
 		kafka.ParseBrokersFromString(a.KafkaBrokers),
 	)
-	db := pkg.NewMemDB()
-	terminalClaims := pkg.NewTerminalClaims(db)
-	w := factory.CreateWatcher(
-		httpClient,
-		factory.CreateGoDevHTTPClient(),
-		sender,
-		completeSender,
-		metrics,
-		a.CursorPath,
-		a.Owner,
-		a.Stage,
-		a.UpdateScope,
-		factory.CreateStaticFilters(allowlist),
-		currentDateTime,
-		terminalClaims,
-	)
+	defer func() {
+		if cerr := saramaClientProvider.Close(); cerr != nil {
+			glog.Warningf("close sarama client provider: %v", cerr)
+		}
+	}()
+	w := a.createWatcher(httpClient, syncProducer, allowlist, claims, currentDateTime)
 	gate := pkg.NewCycleGate()
 	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate)
 
@@ -141,13 +129,44 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	return service.Run(
 		ctx,
+		// Consumes the task lifecycle event stream and records repos whose task
+		// can no longer progress, so a failed emission stops suppressing its repo.
+		// service.Run wraps every func in run.CancelOnFirstFinishWait, which is why
+		// this one must never return on a recoverable error.
+		factory.NewTerminalClaimsConsumer(saramaClientProvider, a.TopicPrefix, claims),
 		a.pollLoop(w, gate, pollInterval),
 		a.createHTTPServer(sentryClient),
-		// Consumes the task lifecycle event stream and records identifiers whose
-		// task can no longer progress, so a failed emission stops suppressing its
-		// repo. service.Run wraps every func in run.CancelOnFirstFinishWait, which
-		// is why this one must never return on a recoverable error.
-		pkg.NewTerminalClaimsConsumer(saramaClientProvider, db, a.TopicPrefix, terminalClaims),
+	)
+}
+
+// createWatcher composes the watcher and its per-cycle collaborators. Split out
+// of Run to keep that function within the linter's length ceiling.
+func (a *application) createWatcher(
+	httpClient *http.Client,
+	syncProducer kafka.SyncProducer,
+	allowlist []string,
+	claims pkg.TerminalClaimsStore,
+	currentDateTime libtime.CurrentDateTimeGetter,
+) pkg.Watcher {
+	sender := factory.CreateKafkaSender(syncProducer, a.TopicPrefix, a.TargetVault)
+	completeSender := factory.CreateKafkaCompleteSender(
+		syncProducer,
+		a.TopicPrefix,
+		a.TargetVault,
+	)
+	return factory.CreateWatcher(
+		httpClient,
+		factory.CreateGoDevHTTPClient(),
+		sender,
+		completeSender,
+		pkg.NewMetrics(nil),
+		a.CursorPath,
+		a.Owner,
+		a.Stage,
+		a.UpdateScope,
+		factory.CreateStaticFilters(allowlist),
+		claims,
+		currentDateTime,
 	)
 }
 
