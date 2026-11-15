@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: approved
 summary: Stamps target_vault on every emitted create-task and complete-task command, so the controller stops refusing the re-emit at validation instead of silently no-oping
 created: "2026-11-12T23:50:00Z"
 queued: "2026-11-12T23:50:00Z"

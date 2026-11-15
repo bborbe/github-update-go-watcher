@@ -7,13 +7,13 @@ package pkg_test
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
+	"sync"
 	"time"
 
 	"github.com/IBM/sarama"
 	agentlib "github.com/bborbe/agent"
 	base "github.com/bborbe/cqrs/base"
-	libkafka "github.com/bborbe/kafka"
-	libkv "github.com/bborbe/kv"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -22,117 +22,114 @@ import (
 
 // taskEvent marshals a real agentlib.Task, so a field or JSON-tag mismatch
 // cannot pass the way a hand-written fixture would.
-func taskEvent(taskID string, frontmatter agentlib.TaskFrontmatter) *sarama.ConsumerMessage {
-	if _, ok := frontmatter["repo"]; !ok {
-		frontmatter["repo"] = "bborbe/disk-status"
+func taskEvent(repo, status, phase string) *sarama.ConsumerMessage {
+	frontmatter := agentlib.TaskFrontmatter{"repo": repo, "status": status}
+	if phase != "" {
+		frontmatter["phase"] = phase
 	}
-	payload, err := json.Marshal(agentlib.Task{
-		TaskIdentifier: agentlib.TaskIdentifier(taskID),
-		Frontmatter:    frontmatter,
-	})
+	payload, err := json.Marshal(agentlib.Task{Frontmatter: frontmatter})
 	Expect(err).NotTo(HaveOccurred())
-	return &sarama.ConsumerMessage{Key: []byte(taskID), Value: payload}
+	return &sarama.ConsumerMessage{Key: []byte(repo), Value: payload}
 }
 
 var _ = Describe("terminal claims consumer", func() {
 	var (
-		ctx   context.Context
-		db    libkv.DB
-		store pkg.TerminalClaims
+		ctx    context.Context
+		store  pkg.TerminalClaimsStore
+		handle func(*sarama.ConsumerMessage) error
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		db = pkg.NewMemDB()
-		store = pkg.NewTerminalClaims(db)
+		store = pkg.NewInMemoryTerminalClaimsStore()
+		handler := pkg.NewTerminalClaimsHandler(store)
+		handle = func(msg *sarama.ConsumerMessage) error {
+			return handler.ConsumeMessage(ctx, msg)
+		}
 	})
 
-	// Run the handler inside a real Update, as the batch consumer does — a nil
-	// tx would not exercise the tx-scoped path the consumer actually uses.
-	consume := func(msg *sarama.ConsumerMessage) error {
-		handler := pkg.NewTerminalClaimsMessageHandler(store)
-		return db.Update(ctx, func(ctx context.Context, tx libkv.Tx) error {
-			return handler.ConsumeMessage(ctx, tx, msg)
-		})
-	}
-
-	allowed := func(taskID string) bool {
-		ok, err := store.Clearable(ctx, taskID)
+	canConsume := func(repo string) bool {
+		ok, err := store.CanConsume(ctx, repo)
 		Expect(err).NotTo(HaveOccurred())
 		return ok
 	}
 
-	DescribeTable("records only tasks that can no longer progress",
-		func(frontmatter agentlib.TaskFrontmatter, recorded bool) {
-			Expect(consume(taskEvent("task-1", frontmatter))).To(Succeed())
-			Expect(allowed("bborbe/disk-status")).To(Equal(recorded))
-		},
-		Entry("completed", agentlib.TaskFrontmatter{"status": "completed"}, true),
-		Entry("aborted", agentlib.TaskFrontmatter{"status": "aborted"}, true),
-		Entry("in_progress parked at human_review",
-			agentlib.TaskFrontmatter{"status": "in_progress", "phase": "human_review"}, true),
-		Entry("hold parked at human_review",
-			agentlib.TaskFrontmatter{"status": "hold", "phase": "human_review"}, true),
-		Entry("hold at planning — a block with no scheduled resume",
-			agentlib.TaskFrontmatter{"status": "hold", "phase": "planning"}, true),
-		Entry("hold at execution",
-			agentlib.TaskFrontmatter{"status": "hold", "phase": "execution"}, true),
-		Entry("running at execution",
-			agentlib.TaskFrontmatter{"status": "in_progress", "phase": "execution"}, false),
-		Entry("running at ai_review",
-			agentlib.TaskFrontmatter{"status": "in_progress", "phase": "ai_review"}, false),
-		Entry("queued at planning",
-			agentlib.TaskFrontmatter{"status": "next", "phase": "planning"}, false),
-		Entry("queued with no phase",
-			agentlib.TaskFrontmatter{"status": "next"}, false),
-	)
-
-	It("ignores a delete event", func() {
-		Expect(consume(&sarama.ConsumerMessage{
-			Key:   []byte("task-1"),
+	It("records only non-progressing tasks", func() {
+		events := []struct {
+			repo   string
+			status string
+			phase  string
+		}{
+			{"bborbe/completed", "completed", ""},
+			{"bborbe/aborted", "aborted", ""},
+			{"bborbe/human-review", "in_progress", "human_review"},
+			{"bborbe/execution", "in_progress", "execution"},
+			{"bborbe/planning", "next", "planning"},
+		}
+		for _, event := range events {
+			Expect(handle(taskEvent(event.repo, event.status, event.phase))).To(Succeed())
+		}
+		Expect(handle(&sarama.ConsumerMessage{
+			Key:   []byte("bborbe/deleted"),
 			Value: nil,
 		})).To(Succeed())
-		Expect(allowed("task-1")).To(BeFalse())
+
+		Expect(canConsume("bborbe/completed")).To(BeTrue())
+		Expect(canConsume("bborbe/aborted")).To(BeTrue())
+		Expect(canConsume("bborbe/human-review")).To(BeTrue())
+		Expect(canConsume("bborbe/execution")).To(BeFalse())
+		Expect(canConsume("bborbe/planning")).To(BeFalse())
+		Expect(canConsume("bborbe/deleted")).To(BeFalse())
 	})
 
-	// The consumer wires the handler through NewMessageHandlerBatchTxUpdate,
-	// which opens db.Update and holds the database's write lock. libkv's DB is
-	// not reentrant, so a handler that opened its own Update would deadlock on
-	// the very first event and the watcher would hang with no error.
-	It("does not deadlock inside the batch transaction", func() {
-		db := pkg.NewMemDB()
-		claimStore := pkg.NewTerminalClaims(db)
-		batch := libkafka.NewMessageHandlerBatchTxUpdate(
-			db,
-			libkafka.NewMessageHandlerBatchTx(
-				pkg.NewTerminalClaimsMessageHandler(claimStore),
-			),
-		)
+	It("hold is non-progressing", func() {
+		Expect(handle(taskEvent("bborbe/held", "hold", "planning"))).To(Succeed())
+		Expect(canConsume("bborbe/held")).To(BeTrue())
+	})
 
-		done := make(chan error, 1)
-		go func() {
-			done <- batch.ConsumeMessages(
-				ctx,
-				[]*sarama.ConsumerMessage{taskEvent("task-1", agentlib.TaskFrontmatter{"status": "aborted"})},
-			)
-		}()
+	It("the entitlement is available exactly once", func() {
+		Expect(store.Observe(ctx, "bborbe/disk-status")).To(Succeed())
+		Expect(canConsume("bborbe/disk-status")).To(BeTrue())
 
-		select {
-		case err := <-done:
-			Expect(err).NotTo(HaveOccurred())
-		case <-time.After(2 * time.Second):
-			Fail("handler deadlocked inside the batch transaction")
+		Expect(store.Consume(ctx, "bborbe/disk-status")).To(Succeed())
+		Expect(canConsume("bborbe/disk-status")).To(BeFalse())
+	})
+
+	It("the consumer never returns on a recoverable error", func() {
+		var mu sync.Mutex
+		calls := 0
+		consume := func(ctx context.Context) error {
+			mu.Lock()
+			calls++
+			attempt := calls
+			mu.Unlock()
+			if attempt == 1 {
+				return stderrors.New("broker unavailable")
+			}
+			<-ctx.Done()
+			return ctx.Err()
 		}
 
-		clearable, err := claimStore.Clearable(ctx, "bborbe/disk-status")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(clearable).To(BeTrue())
+		ctx, cancel := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() {
+			done <- pkg.RunTerminalClaimsConsumer(consume, time.Millisecond)(ctx)
+		}()
+
+		Eventually(func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return calls
+		}).Should(BeNumerically(">=", 2))
+
+		cancel()
+		Eventually(done).Should(Receive(BeNil()))
 	})
 
-	It("derives the topic from the prefix", func() {
-		Expect(pkg.TerminalClaimsTopicForTest(base.TopicPrefix("master")).String()).
-			To(Equal("master-agent-task-v1-event"))
-		Expect(pkg.TerminalClaimsTopicForTest(base.TopicPrefix("")).String()).
+	It("the event topic is derived from the prefix", func() {
+		Expect(pkg.TerminalClaimsEventTopic(base.TopicPrefix("develop")).String()).
+			To(Equal("develop-agent-task-v1-event"))
+		Expect(pkg.TerminalClaimsEventTopic("").String()).
 			To(Equal("agent-task-v1-event"))
 	})
 })

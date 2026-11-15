@@ -32,20 +32,11 @@ var _ = Describe("Main", func() {
 		Expect(pkg.DefaultCursorPath).To(Equal("/data/cursor.json"))
 	})
 
-	It("composes the terminal-claims consumer into service.Run", func() {
+	It("passes the terminal-claims consumer to service.Run", func() {
 		data, err := os.ReadFile("main.go")
 		Expect(err).NotTo(HaveOccurred())
-		source := string(data)
-
-		start := strings.Index(source, "service.Run(")
-		Expect(start).To(BeNumerically(">=", 0), "service.Run call not found in main.go")
-		end := strings.Index(source[start:], "\n\t)")
-		Expect(end).To(BeNumerically(">=", 0), "service.Run call is not terminated")
-		block := source[start : start+end]
-
-		// Scoped to the call block, not the whole file: a constructor that is
-		// declared and tested but never passed to service.Run would otherwise
-		// pass, and the fix would be inert in production.
+		block := serviceRunCallBlock(string(data))
+		Expect(block).NotTo(BeEmpty())
 		Expect(block).To(ContainSubstring("NewTerminalClaimsConsumer"),
 			"the terminal-claims consumer must be a run.Func passed to service.Run")
 	})
@@ -57,6 +48,30 @@ var _ = Describe("Main", func() {
 		Expect(string(data)).NotTo(ContainSubstring("BATCH_SIZE"))
 	})
 })
+
+// serviceRunCallBlock extracts the service.Run(...) call by balancing
+// parentheses, so an argument nested inside another constructor cannot end the
+// block early. Scoped to the call block, not a file-wide count: a constructor
+// that is declared and tested but never passed cannot pass.
+func serviceRunCallBlock(source string) string {
+	start := strings.Index(source, "service.Run(")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(source); i++ {
+		switch source[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return source[start : i+1]
+			}
+		}
+	}
+	return source[start:]
+}
 
 func TestSuite(t *testing.T) {
 	time.Local = time.UTC

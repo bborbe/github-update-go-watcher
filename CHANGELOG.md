@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- fix: End the emission claim when the emitted task can no longer progress — a terminal status (`completed`, `aborted`), `status: hold`, or `phase: human_review` — instead of waiting out the 14-day `InFlightTTL`. The watcher consumes the task lifecycle event topic through an in-process, repo-keyed store; `emissionInFlight` gains a fifth clearing condition bounded to once per claim generation. A failed emission at a moved HEAD drops the dedup keys and re-emits; at an unchanged HEAD it keeps them and is skipped `sha_unchanged`, so no identity-identical duplicate is filed. `markPublished` re-arms the entitlement only for a publish carrying a new identifier, which also stops a forced cycle from re-arming an identity-identical publish.
+
 ## v0.11.2
 
 - fix: file Go-update decision records at phase human_review so UnreachablePhase stops firing on records no Config can claim
