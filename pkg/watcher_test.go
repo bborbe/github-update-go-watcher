@@ -5,9 +5,12 @@
 package pkg_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -1148,6 +1151,46 @@ var _ = Describe("emission claim (spec 005)", func() {
 			since.Format(time.RFC3339) + `"}`
 	}
 
+	// captureGlog captures glog's V(2) output while fn runs, so a spec can
+	// assert the skip LINE itself and not only the counter beside it. glog's
+	// stderr sink resolves os.Stderr at write time (glog_file.go
+	// stderrSink.Emit) and -logtostderr disables the file sink, so swapping
+	// os.Stderr for a pipe routes exactly this window's log output into buf.
+	captureGlog := func(fn func()) string {
+		origStderr := os.Stderr
+		origVerbosity := flag.Lookup("v").Value.String()
+		origLogToStderr := flag.Lookup("logtostderr").Value.String()
+
+		reader, writer, err := os.Pipe()
+		Expect(err).NotTo(HaveOccurred())
+		os.Stderr = writer
+		Expect(flag.Set("v", "2")).To(Succeed())
+		Expect(flag.Set("logtostderr", "true")).To(Succeed())
+
+		var buf bytes.Buffer
+		drained := make(chan struct{})
+		go func() {
+			// The spec goroutine cannot assert here; a read error surfaces as a
+			// missing assertion below, never as a silent pass.
+			_, _ = io.Copy(&buf, reader)
+			close(drained)
+		}()
+
+		func() {
+			defer func() {
+				os.Stderr = origStderr
+				_ = flag.Set("v", origVerbosity)
+				_ = flag.Set("logtostderr", origLogToStderr)
+				Expect(writer.Close()).To(Succeed())
+			}()
+			fn()
+		}()
+
+		<-drained
+		Expect(reader.Close()).To(Succeed())
+		return buf.String()
+	}
+
 	It("a live claim suppresses a second emission", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 
@@ -1156,6 +1199,25 @@ var _ = Describe("emission claim (spec 005)", func() {
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
 		Expect(filterSkippedValue("sha_unchanged")).To(Equal(0.0))
+	})
+
+	// The suppression must be observable and attributable, not only counted:
+	// the emitted skip line names the reason AND the repo, which is what makes
+	// a suppression traceable to the repo it held back.
+	It("emits a skip line naming the repo when a live claim suppresses the emission", func() {
+		writeCursorState(claimState(now().Add(-libtime.Hour)))
+
+		output := captureGlog(func() {
+			Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		})
+		// Dumped on failure, and under -ginkgo.v, so a broken assertion shows
+		// what the watcher actually emitted.
+		GinkgoWriter.Printf("captured log output:\n%s\n", output)
+
+		Expect(output).To(ContainSubstring(
+			"repo skipped repo=" + repoKey + " reason=emission_in_flight",
+		))
+		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 	})
 
 	// Spec 007: the emission's task can no longer progress (terminal, or parked at
