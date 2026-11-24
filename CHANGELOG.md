@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.12.0
 
 - feat: add `GitHubClient.GetFile` and parsers for a repo's ignore surfaces (`VULNCHECK_IGNORE` in `Makefile`/`Makefile.precommit`, `.trivyignore`, `.osv-scanner.toml`) so the stale-ignore pass can learn which advisories a repo suppresses without cloning it
 - feat: add `OSVClient.CheckWithdrawn` to classify an advisory ID as withdrawn, legitimate or unresolved, resolving a 404 alias through the cached Go vulnerability index
