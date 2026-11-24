@@ -8,6 +8,11 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: remove 8 stale vulnerability ignore IDs
+- ci: install Trivy from a pinned, checksum-verified release tarball so the test job stops failing on the removed `apt-key` helper
+
 ## v0.12.0
 
 - feat: add `GitHubClient.GetFile` and parsers for a repo's ignore surfaces (`VULNCHECK_IGNORE` in `Makefile`/`Makefile.precommit`, `.trivyignore`, `.osv-scanner.toml`) so the stale-ignore pass can learn which advisories a repo suppresses without cloning it
