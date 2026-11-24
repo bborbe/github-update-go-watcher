@@ -1,0 +1,37 @@
+repo=github.com/bborbe/run
+osv url=https://api.osv.dev/v1/vulns/CVE-2026-33997 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/CVE-2026-34040 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/CVE-2026-41567 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/CVE-2026-41568 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/CVE-2026-42306 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-pxq6-2prw-chj9 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-rg2x-37c3-w2rh status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-vp62-88p7-qqf5 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-x744-4wpc-v9h2 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-x86f-5xw2-fm2r status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GHSA-xmrv-pmrh-hhx2 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2022-0470 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-4514 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-4771 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-4772 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6599 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6600 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6603 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6604 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6605 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6607 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6608 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6609 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6610 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6611 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6612 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6613 status=200 withdrawn=absent
+osv url=https://api.osv.dev/v1/vulns/GO-2026-6617 status=200 withdrawn=absent
+metric ignore_scan_total result=clean value=1
+metric ignore_scan_total result=error value=0
+metric ignore_scan_total result=rate_limited value=0
+metric ignore_scan_total result=scanned value=1
+metric ignore_scan_total result=stale value=0
+metric ignore_scan_total result=unresolved value=0
+abort_reason=
+exit_code=0
