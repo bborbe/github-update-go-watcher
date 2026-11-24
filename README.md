@@ -27,7 +27,29 @@ Same shape as `github-release-watcher`'s `release.autoRelease` gate. See the [Wa
 
 Detection is deliberately shallow: fetch `go.mod` via the GitHub contents API and compare its go-directive against latest stable. **No clone.**
 
-Full dependency and vulnerability determination is the agent's job — it clones anyway during planning, and closes a repo as a no-op when there is nothing to change. A repo that is current on Go but has stale deps is reached on demand via `/github-update-go-repo-trigger <owner/repo>`; the cheap fleet signal cannot see that without cloning.
+Full dependency and vulnerability determination is the agent's job — it clones anyway during planning, and closes a repo as a no-op when there is nothing to change. A repo that is current on Go but has stale deps is reached on demand via `/github-update-go-repo-trigger <owner/repo>`; the cheap fleet signal cannot see that without cloning — with one exception, the **stale ignore**: an advisory OSV has withdrawn is visible from the repo's ignore files alone, and is detected by the [stale-ignore signal](#stale-ignore-signal).
+
+## Stale-ignore signal
+
+This is the watcher's **second, independent signal**. The first is "declared Go version behind stable"; this one is "an ignore suppresses an advisory that no longer exists". Both cause `github-update-go-agent` to open a repo-modifying PR, so both honour the same [two gates](#scope--two-gates-both-must-pass) — the operator allowlist and `goUpdate.autoUpdate: true`. A repo that has refused consent is never auto-cleaned, so a Go-current repo with consent refused keeps its stale ignore until an operator clears it by hand. That is a deliberate limitation, not an oversight.
+
+It runs **inside the existing poll cycle** — no extra cron, deployment or configuration. Its cost is bounded by two constants: at most **10** repos per cycle and a **24-hour** per-repo rescan interval, so a fleet of a few hundred repos is covered about once a day. Per selected repo it reads at most four files (three GitHub calls to gather the repo plus up to four surface reads).
+
+The three ignore **surfaces**, across four files:
+
+- the `VULNCHECK_IGNORE` assignment in `Makefile` and `Makefile.precommit` (including a `\`-continued multi-line assignment)
+- `.trivyignore` — one ID per line, `#` comments and trailing remarks ignored
+- `.osv-scanner.toml` — every `id = "…"` inside an `[[IgnoredVulns]]` block
+
+A missing file is an empty surface, not an error. The fleet's fourth surface — the `TRIVY_IGNORE` template in `bborbe/coding` — is out of reach of a repo-level scan and is covered only when that repo itself is scanned.
+
+The **verdict** is exactly one: `withdrawn`. Each suppressed ID is looked up on `api.osv.dev`; an ID whose own record 404s is resolved through the Go vulnerability index, because OSV merges some CVEs into a `GO-*` record and only the merged record carries the withdrawal. A 404 that resolves to no record, and any transport or decode failure, is **unresolved** — never stale, and never an emission. Resolved verdicts are cached in the cursor for a day; unresolved IDs are retried next cycle.
+
+What it does **not** do: it does not classify an ignore as stale for any other reason (package absent, version no longer affected), it does not remove or comment on anything, and it does not triage firing vulnerabilities. Those are the agent's planning-time job and [`/github-update-go-vuln-watcher`](https://github.com/bborbe/github-update-go-vuln-watcher)'s role respectively.
+
+**Duplicates.** One task is filed per repo per stale set, identified by repo, a monotonic generation and the sorted set of stale IDs. An unchanged set is re-filed at most once every **7 days**, with a new identifier so the record actually runs; a task that dies without removing the ignore is therefore re-filed rather than freezing the repo, and an older task may still be open when the re-emit lands. Reconciling duplicates on the board is out of scope — the agent re-reads the surfaces from the repo, so an older task is a no-op or closes itself.
+
+The emitted task reuses `task_type: github-update-go` and `assignee: github-update-go-agent`, so no downstream Config change is needed. Its title is `Remove Stale Ignores <owner>-<repo>`.
 
 ## Trigger model
 
@@ -67,6 +89,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `published_total` | `status` | Tasks published to Kafka. Labels: `create`, `error` |
 | `repos_scanned_total` | — | Total repos scanned across all cycles |
 | `filter_skipped_total` | `reason` | Repos skipped by the filter chain. Labels: see Skip reasons |
+| `ignore_scan_total` | `result` | Stale-ignore scans by outcome. Labels: `scanned`, `clean`, `stale`, `unresolved`, `error`, `rate_limited` |
 
 ## Skip reasons
 

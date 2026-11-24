@@ -1,0 +1,7 @@
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "golang.org/x/crypto/openpgp unmaintained, no fix will ship"
+
+[[IgnoredVulns]]
+id = "CVE-2022-31022"
+reason = "bleve v1 EOL"

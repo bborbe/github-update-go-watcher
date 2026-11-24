@@ -18,6 +18,11 @@ type Metrics struct {
 	incFilterSkippedArgsForCall []struct {
 		arg1 string
 	}
+	IncIgnoreScanStub        func(string)
+	incIgnoreScanMutex       sync.RWMutex
+	incIgnoreScanArgsForCall []struct {
+		arg1 string
+	}
 	IncPollCycleStub        func(string)
 	incPollCycleMutex       sync.RWMutex
 	incPollCycleArgsForCall []struct {
@@ -98,6 +103,38 @@ func (fake *Metrics) IncFilterSkippedArgsForCall(i int) string {
 	fake.incFilterSkippedMutex.RLock()
 	defer fake.incFilterSkippedMutex.RUnlock()
 	argsForCall := fake.incFilterSkippedArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *Metrics) IncIgnoreScan(arg1 string) {
+	fake.incIgnoreScanMutex.Lock()
+	fake.incIgnoreScanArgsForCall = append(fake.incIgnoreScanArgsForCall, struct {
+		arg1 string
+	}{arg1})
+	stub := fake.IncIgnoreScanStub
+	fake.recordInvocation("IncIgnoreScan", []interface{}{arg1})
+	fake.incIgnoreScanMutex.Unlock()
+	if stub != nil {
+		fake.IncIgnoreScanStub(arg1)
+	}
+}
+
+func (fake *Metrics) IncIgnoreScanCallCount() int {
+	fake.incIgnoreScanMutex.RLock()
+	defer fake.incIgnoreScanMutex.RUnlock()
+	return len(fake.incIgnoreScanArgsForCall)
+}
+
+func (fake *Metrics) IncIgnoreScanCalls(stub func(string)) {
+	fake.incIgnoreScanMutex.Lock()
+	defer fake.incIgnoreScanMutex.Unlock()
+	fake.IncIgnoreScanStub = stub
+}
+
+func (fake *Metrics) IncIgnoreScanArgsForCall(i int) string {
+	fake.incIgnoreScanMutex.RLock()
+	defer fake.incIgnoreScanMutex.RUnlock()
+	argsForCall := fake.incIgnoreScanArgsForCall[i]
 	return argsForCall.arg1
 }
 

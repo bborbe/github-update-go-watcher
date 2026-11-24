@@ -206,3 +206,67 @@ var _ = Describe("Metrics", func() {
 		})
 	})
 })
+
+var _ = Describe("Metrics ignore_scan_total", func() {
+	var reg *prometheus.Registry
+
+	BeforeEach(func() {
+		reg = prometheus.NewRegistry()
+	})
+
+	It("registers ignore_scan_total", func() {
+		pkg.NewMetrics(reg)
+		families, err := reg.Gather()
+		Expect(err).NotTo(HaveOccurred())
+		names := make([]string, len(families))
+		for i, family := range families {
+			names[i] = family.GetName()
+		}
+		Expect(names).To(ContainElement("github_update_go_watcher_ignore_scan_total"))
+	})
+
+	It("pre-initialises all six IgnoreScanResults series to 0", func() {
+		pkg.NewMetrics(reg)
+		families, err := reg.Gather()
+		Expect(err).NotTo(HaveOccurred())
+		seen := map[string]float64{}
+		for _, family := range families {
+			if family.GetName() != "github_update_go_watcher_ignore_scan_total" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "result" {
+						seen[label.GetValue()] = metric.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		Expect(seen).To(HaveLen(len(pkg.IgnoreScanResults)))
+		for _, result := range pkg.IgnoreScanResults {
+			Expect(seen).To(HaveKey(result))
+			Expect(seen[result]).To(Equal(0.0))
+		}
+	})
+
+	It("IncIgnoreScan moves the correct series to 1", func() {
+		m := pkg.NewMetrics(reg)
+		m.IncIgnoreScan("stale")
+		families, err := reg.Gather()
+		Expect(err).NotTo(HaveOccurred())
+		for _, family := range families {
+			if family.GetName() != "github_update_go_watcher_ignore_scan_total" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "result" && label.GetValue() == "stale" {
+						Expect(metric.GetCounter().GetValue()).To(Equal(1.0))
+						return
+					}
+				}
+			}
+		}
+		Fail("ignore_scan_total metric or stale label not found")
+	})
+})

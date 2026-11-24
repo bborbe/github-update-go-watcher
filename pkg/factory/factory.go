@@ -48,6 +48,18 @@ func CreateGoDevHTTPClient() *http.Client {
 	return &http.Client{Timeout: goDevTimeout}
 }
 
+// osvTimeout bounds each OSV request. The pass is best-effort: a slow upstream
+// must not stall a cycle.
+const osvTimeout = 10 * time.Second
+
+// CreateOSVHTTPClient returns the plain HTTP client used for OSV lookups.
+//
+// It is deliberately NOT the GitHub App-authenticated client: reusing that
+// client would send an installation token to a third-party host.
+func CreateOSVHTTPClient() *http.Client {
+	return &http.Client{Timeout: osvTimeout}
+}
+
 // CreateKafkaSender constructs the typed create-task command sender backed by
 // a Kafka sync producer.
 //
@@ -119,6 +131,7 @@ func CreateStaticFilters(allowlist []string) filter.TaskCreationFilter {
 func CreateWatcher(
 	githubHTTPClient *http.Client,
 	goDevHTTPClient *http.Client,
+	osvHTTPClient *http.Client,
 	sender task.CreateCommandSender,
 	completeSender task.CompleteCommandSender,
 	metrics pkg.Metrics,
@@ -126,6 +139,7 @@ func CreateWatcher(
 	owner string,
 	stage string,
 	updateScope string,
+	allowlist []string,
 	taskCreationFilter filter.TaskCreationFilter,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	terminalClaims pkg.TerminalClaims,
@@ -136,6 +150,12 @@ func CreateWatcher(
 		Stage:       stage,
 		UpdateScope: updateScope,
 	})
+	osvClient := pkg.NewOSVClient(
+		osvHTTPClient,
+		pkg.DefaultOSVVulnBaseURL,
+		pkg.DefaultOSVIndexURL,
+		currentDateTimeGetter,
+	)
 	return pkg.NewWatcher(
 		ghClient,
 		goDevClient,
@@ -147,6 +167,8 @@ func CreateWatcher(
 		taskCreationFilter,
 		currentDateTimeGetter,
 		terminalClaims,
+		osvClient,
+		allowlist,
 	)
 }
 

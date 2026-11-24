@@ -33,6 +33,20 @@ type TaskPublisher struct {
 	publishDecisionReturnsOnCall map[int]struct {
 		result1 bool
 	}
+	PublishStaleIgnoreStub        func(context.Context, pkg.Candidate, pkg.StaleIgnoreFinding, int) bool
+	publishStaleIgnoreMutex       sync.RWMutex
+	publishStaleIgnoreArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+		arg3 pkg.StaleIgnoreFinding
+		arg4 int
+	}
+	publishStaleIgnoreReturns struct {
+		result1 bool
+	}
+	publishStaleIgnoreReturnsOnCall map[int]struct {
+		result1 bool
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -157,6 +171,70 @@ func (fake *TaskPublisher) PublishDecisionReturnsOnCall(i int, result1 bool) {
 		})
 	}
 	fake.publishDecisionReturnsOnCall[i] = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishStaleIgnore(arg1 context.Context, arg2 pkg.Candidate, arg3 pkg.StaleIgnoreFinding, arg4 int) bool {
+	fake.publishStaleIgnoreMutex.Lock()
+	ret, specificReturn := fake.publishStaleIgnoreReturnsOnCall[len(fake.publishStaleIgnoreArgsForCall)]
+	fake.publishStaleIgnoreArgsForCall = append(fake.publishStaleIgnoreArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+		arg3 pkg.StaleIgnoreFinding
+		arg4 int
+	}{arg1, arg2, arg3, arg4})
+	stub := fake.PublishStaleIgnoreStub
+	fakeReturns := fake.publishStaleIgnoreReturns
+	fake.recordInvocation("PublishStaleIgnore", []interface{}{arg1, arg2, arg3, arg4})
+	fake.publishStaleIgnoreMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *TaskPublisher) PublishStaleIgnoreCallCount() int {
+	fake.publishStaleIgnoreMutex.RLock()
+	defer fake.publishStaleIgnoreMutex.RUnlock()
+	return len(fake.publishStaleIgnoreArgsForCall)
+}
+
+func (fake *TaskPublisher) PublishStaleIgnoreCalls(stub func(context.Context, pkg.Candidate, pkg.StaleIgnoreFinding, int) bool) {
+	fake.publishStaleIgnoreMutex.Lock()
+	defer fake.publishStaleIgnoreMutex.Unlock()
+	fake.PublishStaleIgnoreStub = stub
+}
+
+func (fake *TaskPublisher) PublishStaleIgnoreArgsForCall(i int) (context.Context, pkg.Candidate, pkg.StaleIgnoreFinding, int) {
+	fake.publishStaleIgnoreMutex.RLock()
+	defer fake.publishStaleIgnoreMutex.RUnlock()
+	argsForCall := fake.publishStaleIgnoreArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+}
+
+func (fake *TaskPublisher) PublishStaleIgnoreReturns(result1 bool) {
+	fake.publishStaleIgnoreMutex.Lock()
+	defer fake.publishStaleIgnoreMutex.Unlock()
+	fake.PublishStaleIgnoreStub = nil
+	fake.publishStaleIgnoreReturns = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishStaleIgnoreReturnsOnCall(i int, result1 bool) {
+	fake.publishStaleIgnoreMutex.Lock()
+	defer fake.publishStaleIgnoreMutex.Unlock()
+	fake.PublishStaleIgnoreStub = nil
+	if fake.publishStaleIgnoreReturnsOnCall == nil {
+		fake.publishStaleIgnoreReturnsOnCall = make(map[int]struct {
+			result1 bool
+		})
+	}
+	fake.publishStaleIgnoreReturnsOnCall[i] = struct {
 		result1 bool
 	}{result1}
 }
