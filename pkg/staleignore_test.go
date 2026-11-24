@@ -401,6 +401,57 @@ var _ = Describe("staleIgnorePass", func() {
 		Expect(cursor.OSVVerdicts).NotTo(HaveKey("GO-2026-1111"))
 	})
 
+	It("an unresolved verdict keeps the recorded stale set so a retry does not re-emit", func() {
+		setMakefile("VULNCHECK_IGNORE = GO-2026-1111\n")
+		osvClient.CheckWithdrawnReturns(pkg.OSVVerdictWithdrawn, nil)
+		Expect(scan()).To(Equal(""))
+		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
+		emitted := state().IgnoreStaleIDs
+		generation := state().IgnoreStaleGeneration
+		Expect(emitted).To(Equal("GO-2026-1111"))
+
+		// A transient OSV failure on the next scan must not look like the
+		// set shrinking: the record survives, so the retry below is a no-op.
+		cursor.OSVVerdicts = map[string]*pkg.OSVVerdictEntry{}
+		osvClient.CheckWithdrawnReturns(pkg.OSVVerdictUnresolved, nil)
+		clock.SetNow(startNow.Add(libtime.Hour))
+		Expect(scan()).To(Equal(""))
+		Expect(state().IgnoreStaleIDs).To(Equal(emitted))
+		Expect(state().IgnoreStaleGeneration).To(Equal(generation))
+		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
+
+		// The same set resolving again is still unchanged, so still no emit.
+		osvClient.CheckWithdrawnReturns(pkg.OSVVerdictWithdrawn, nil)
+		clock.SetNow(startNow.Add(2 * libtime.Hour))
+		Expect(scan()).To(Equal(""))
+		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
+		Expect(state().IgnoreStaleGeneration).To(Equal(generation))
+	})
+
+	It("a partial unresolved result does not emit a shrunk set", func() {
+		setMakefile("VULNCHECK_IGNORE = GO-2026-1111 GO-2026-2222\n")
+		osvClient.CheckWithdrawnStub = func(_ context.Context, id string) (pkg.OSVVerdict, error) {
+			return pkg.OSVVerdictWithdrawn, nil
+		}
+		Expect(scan()).To(Equal(""))
+		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
+		Expect(state().IgnoreStaleIDs).To(Equal("GO-2026-1111,GO-2026-2222"))
+
+		// GO-2026-2222 becomes unclassifiable: every ID we could still prove
+		// stale is already recorded, so the set has not shrunk.
+		cursor.OSVVerdicts = map[string]*pkg.OSVVerdictEntry{}
+		osvClient.CheckWithdrawnStub = func(_ context.Context, id string) (pkg.OSVVerdict, error) {
+			if id == "GO-2026-2222" {
+				return pkg.OSVVerdictUnresolved, nil
+			}
+			return pkg.OSVVerdictWithdrawn, nil
+		}
+		clock.SetNow(startNow.Add(libtime.Hour))
+		Expect(scan()).To(Equal(""))
+		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
+		Expect(state().IgnoreStaleIDs).To(Equal("GO-2026-1111,GO-2026-2222"))
+	})
+
 	It("reuses a fresh cached verdict without calling OSV", func() {
 		setMakefile("VULNCHECK_IGNORE = GO-2026-1111\n")
 		cursor.OSVVerdicts = map[string]*pkg.OSVVerdictEntry{

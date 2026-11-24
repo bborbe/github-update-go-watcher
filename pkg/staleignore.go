@@ -114,9 +114,12 @@ func (p *staleIgnorePass) scanRepo(
 	}
 
 	state := repoState(cursorState, repo)
-	if !candidate.GoModPresent || candidate.Consent != filter.GrantedConsent {
+	if !candidate.GoModPresent || !candidate.GoModParsable || candidate.Consent != filter.GrantedConsent {
 		reason := "no_gomod"
-		if candidate.GoModPresent {
+		switch {
+		case candidate.GoModPresent && !candidate.GoModParsable:
+			reason = "gomod_unparsable"
+		case candidate.GoModPresent:
 			reason = "consent_not_granted"
 		}
 		glog.V(2).Infof("stale-ignore: repo skipped repo=%s reason=%s", repo.Key(), reason)
@@ -143,23 +146,73 @@ func (p *staleIgnorePass) scanRepo(
 	}
 
 	staleIDs, unresolved := p.resolveVerdicts(ctx, cursorState, ids, now)
+	p.handleFinding(ctx, state, repo, candidate, surfaces, staleIDs, unresolved, now)
+	return ""
+}
+
+// handleFinding turns a resolved scan into a metric, a cursor update and, when
+// the set is genuinely new, one emission. It never aborts the cycle.
+func (p *staleIgnorePass) handleFinding(
+	ctx context.Context,
+	state *RepoState,
+	repo Repo,
+	candidate Candidate,
+	surfaces map[string][]string,
+	staleIDs []string,
+	unresolved bool,
+	now libtime.DateTime,
+) {
 	if len(staleIDs) == 0 {
 		if unresolved {
+			// A transient OSV failure is not evidence that a previously
+			// recorded stale set is gone: clearing it here would make the
+			// next successful scan of the SAME set read as a change and
+			// file a duplicate task. Keep the record; retry next cycle.
 			p.metrics.IncIgnoreScan("unresolved")
 		} else {
 			p.metrics.IncIgnoreScan("clean")
+			clearStaleSet(state)
 		}
-		clearStaleSet(state)
 		state.IgnoreScannedAt = now.Format(time.RFC3339)
-		return ""
+		return
 	}
 
 	p.metrics.IncIgnoreScan("stale")
+	if unresolved && recordedCovers(state.IgnoreStaleIDs, staleIDs) {
+		// Every ID this scan could prove stale is already in the recorded
+		// set; the IDs it could not classify may still be stale. Emitting
+		// would re-file a set that has not actually shrunk.
+		glog.V(2).Infof(
+			"stale-ignore: no emission repo=%s reason=unresolved_partial recorded=%q",
+			repo.Key(),
+			state.IgnoreStaleIDs,
+		)
+		state.IgnoreScannedAt = now.Format(time.RFC3339)
+		return
+	}
 	finding := StaleIgnoreFinding{IDs: staleIDs, Surfaces: surfaces}
 	if p.emit(ctx, state, candidate, finding, now) {
 		state.IgnoreScannedAt = now.Format(time.RFC3339)
 	}
-	return ""
+}
+
+// recordedCovers reports whether every ID in ids is already recorded in the
+// comma-joined recorded set. Used to suppress an emission that a partial OSV
+// failure would otherwise make look like a change.
+func recordedCovers(recorded string, ids []string) bool {
+	if recorded == "" {
+		return false
+	}
+	have := make(map[string]struct{})
+	for _, id := range strings.Split(recorded, ",") {
+		have[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := have[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // selectRepos applies the allowlist and the rescan throttle, then truncates to
