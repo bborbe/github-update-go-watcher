@@ -54,6 +54,8 @@ func NewWatcher(
 	taskCreationFilter filter.TaskCreationFilter,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	terminalClaims TerminalClaims,
+	osvClient OSVClient,
+	allowlist []string,
 ) Watcher {
 	return &watcher{
 		ghClient:              ghClient,
@@ -66,6 +68,14 @@ func NewWatcher(
 		taskCreationFilter:    taskCreationFilter,
 		currentDateTimeGetter: currentDateTimeGetter,
 		terminalClaims:        terminalClaims,
+		staleIgnorePass: NewStaleIgnorePass(
+			ghClient,
+			osvClient,
+			publisher,
+			metrics,
+			allowlist,
+			currentDateTimeGetter,
+		),
 	}
 }
 
@@ -80,6 +90,7 @@ type watcher struct {
 	taskCreationFilter    filter.TaskCreationFilter
 	currentDateTimeGetter libtime.CurrentDateTimeGetter
 	terminalClaims        TerminalClaims
+	staleIgnorePass       StaleIgnorePass
 	// pendingTerminalConsume holds the task identifiers this cycle cleared a
 	// claim for. Their entitlements are spent only after the cursor save
 	// succeeds — see consumePending.
@@ -144,22 +155,48 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 		// Persist cursor mutations made before the abort (completed-head
 		// markers) so a completion already published this cycle is not
 		// re-published next cycle after a lost in-memory state.
-		if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
-			glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
-		} else {
-			w.consumePending(ctx)
-		}
+		w.saveCursorAndConsume(ctx, cursorState)
 		return nil
 	}
 
-	if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
-		glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
-	} else {
-		w.consumePending(ctx)
+	if reason := w.staleIgnores(ctx, cursorState, repos, latestGo); reason != "" {
+		w.metrics.IncPollCycle(reason)
+		glog.Warningf(
+			"poll cycle: stale-ignore pass aborted reason=%s owner=%s",
+			reason,
+			w.owner,
+		)
+		w.saveCursorAndConsume(ctx, cursorState)
+		return nil
 	}
+
+	w.saveCursorAndConsume(ctx, cursorState)
 
 	w.metrics.IncPollCycle("success")
 	return nil
+}
+
+// saveCursorAndConsume persists the cursor and, only when the save succeeded,
+// spends the entitlements for the claims this cycle cleared.
+func (w *watcher) saveCursorAndConsume(ctx context.Context, cursorState *Cursor) {
+	if err := SaveCursor(ctx, w.cursorPath, cursorState); err != nil {
+		glog.Warningf("save cursor failed path=%s err=%v", w.cursorPath, err)
+		return
+	}
+	w.consumePending(ctx)
+}
+
+// staleIgnores runs the stale-ignore pass and returns an abort reason
+// ("rate_limited" | "github_error" | ""). It is a thin delegate: the pass is a
+// separate type so the live exercise program can drive it without running the
+// Go-bump cycle.
+func (w *watcher) staleIgnores(
+	ctx context.Context,
+	cursorState *Cursor,
+	repos []Repo,
+	latestGo Version,
+) string {
+	return w.staleIgnorePass.Scan(ctx, cursorState, repos, latestGo)
 }
 
 func (w *watcher) processRepos(
@@ -180,7 +217,7 @@ func (w *watcher) processRepos(
 		default:
 		}
 
-		candidate, abortReason, dropped := w.gatherCandidate(ctx, repo, latestGo)
+		candidate, abortReason, dropped := gatherCandidate(ctx, w.ghClient, repo, latestGo)
 		if abortReason != "" {
 			return abortReason
 		}
@@ -612,12 +649,13 @@ func (w *watcher) emissionInFlight(
 	return true
 }
 
-func (w *watcher) gatherCandidate(
+func gatherCandidate(
 	ctx context.Context,
+	ghClient GitHubClient,
 	repo Repo,
 	latestGo Version,
 ) (Candidate, string, bool) {
-	headSHA, err := w.ghClient.GetHeadSHA(ctx, repo)
+	headSHA, err := ghClient.GetHeadSHA(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
 			return Candidate{}, "rate_limited", false
@@ -625,7 +663,7 @@ func (w *watcher) gatherCandidate(
 		return dropRepo(repo, "head_sha", err)
 	}
 
-	goModContent, err := w.ghClient.GetGoMod(ctx, repo)
+	goModContent, err := ghClient.GetGoMod(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
 			return Candidate{}, "rate_limited", false
@@ -633,7 +671,7 @@ func (w *watcher) gatherCandidate(
 		return dropRepo(repo, "go_mod", err)
 	}
 
-	consent, err := w.ghClient.GetMaintainerConfig(ctx, repo)
+	consent, err := ghClient.GetMaintainerConfig(ctx, repo)
 	if err != nil {
 		if stderrors.Is(err, ErrRateLimited) {
 			return Candidate{}, "rate_limited", false

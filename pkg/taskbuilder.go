@@ -6,6 +6,7 @@ package pkg
 
 import (
 	"fmt"
+	"strings"
 
 	agentlib "github.com/bborbe/agent"
 	"github.com/bborbe/agent/command/task"
@@ -56,6 +57,17 @@ func buildFrontmatter(
 	taskIDStr string,
 	cfg TaskConfig,
 ) agentlib.TaskFrontmatter {
+	return baseFrontmatter(c, ComputeTaskTitle(c), taskIDStr, cfg)
+}
+
+// baseFrontmatter builds the frozen task envelope shared by every create task.
+// Only the title, the identifier and the body vary between task kinds.
+func baseFrontmatter(
+	c Candidate,
+	title string,
+	taskIDStr string,
+	cfg TaskConfig,
+) agentlib.TaskFrontmatter {
 	frontmatter := agentlib.TaskFrontmatter{
 		"task_type":       "github-update-go",
 		"assignee":        "github-update-go-agent",
@@ -63,7 +75,7 @@ func buildFrontmatter(
 		"status":          "in_progress",
 		"stage":           cfg.Stage,
 		"task_identifier": taskIDStr,
-		"title":           ComputeTaskTitle(c),
+		"title":           title,
 		"repo":            c.Repo.String(),
 		"clone_url": fmt.Sprintf(
 			"git@github.com:%s/%s.git",
@@ -134,6 +146,74 @@ func buildDecisionFrontmatter(
 		"current_go":      c.CurrentGo.Number(),
 		"latest_go":       c.LatestGo.Number(),
 	}
+}
+
+// StaleIgnoreFinding is one repo's stale-ignore verdict: the advisory IDs OSV
+// reports as withdrawn, and per ID the ignore surface files that declare it.
+type StaleIgnoreFinding struct {
+	IDs      []string            // sorted, de-duplicated
+	Surfaces map[string][]string // advisory ID -> surface paths, in IgnoreSurfaceFiles order
+}
+
+// ComputeStaleIgnoreTaskTitle returns the frozen title form
+// "Remove Stale Ignores <owner>-<repo>" — dash form, no HEAD SHA: the identity
+// is the stale set, not the commit. CreateCommand.Validate rejects any '/' in a
+// title, so the dash form is mandatory.
+func ComputeStaleIgnoreTaskTitle(c Candidate) string {
+	return fmt.Sprintf("Remove Stale Ignores %s-%s", c.Repo.Owner, c.Repo.Name)
+}
+
+// BuildStaleIgnoreCommand assembles the CreateTaskCommand for one stale-ignore
+// finding. The envelope is exactly BuildCreateCommand's — same task_type,
+// assignee, phase, status, stage, repo, clone_url, ref, current_go, latest_go
+// and optional update_scope — with only the identifier, the title and the body
+// different. target_vault is NOT set here: it is stamped at send time by the
+// typed sender.
+func BuildStaleIgnoreCommand(
+	c Candidate,
+	finding StaleIgnoreFinding,
+	generation int,
+	cfg TaskConfig,
+) task.CreateCommand {
+	title := ComputeStaleIgnoreTaskTitle(c)
+	taskIDStr := DeriveStaleIgnoreTaskID(
+		c.Repo.Owner,
+		c.Repo.Name,
+		generation,
+		finding.IDs,
+	).String()
+	return task.CreateCommand{
+		Title:          title,
+		TaskIdentifier: agentlib.TaskIdentifier(taskIDStr),
+		Frontmatter:    baseFrontmatter(c, title, taskIDStr, cfg),
+		Body:           buildStaleIgnoreBody(c, finding),
+	}
+}
+
+func buildStaleIgnoreBody(c Candidate, finding StaleIgnoreFinding) string {
+	owner := c.Repo.Owner
+	name := c.Repo.Name
+	var body strings.Builder
+	fmt.Fprintf(&body, "# Remove Stale Ignores: %s/%s\n\n", owner, name)
+	body.WriteString(
+		"OSV reports the following advisories as withdrawn, but this repo still\n" +
+			"suppresses them:\n\n",
+	)
+	for _, id := range finding.IDs {
+		files := finding.Surfaces[id]
+		quoted := make([]string, 0, len(files))
+		for _, file := range files {
+			quoted = append(quoted, "`"+file+"`")
+		}
+		fmt.Fprintf(&body, "- `%s` — surfaces: %s\n", id, strings.Join(quoted, ", "))
+	}
+	fmt.Fprintf(
+		&body,
+		"\n**Repo:** [%s/%s](https://github.com/%s/%s)\n",
+		owner, name, owner, name,
+	)
+	fmt.Fprintf(&body, "**HEAD:** %s\n", c.ShortSHA())
+	return body.String()
 }
 
 func buildDecisionTaskBody(c Candidate) string {

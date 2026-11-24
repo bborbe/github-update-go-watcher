@@ -120,6 +120,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	w := factory.CreateWatcher(
 		httpClient,
 		factory.CreateGoDevHTTPClient(),
+		factory.CreateOSVHTTPClient(),
 		sender,
 		completeSender,
 		metrics,
@@ -127,6 +128,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.Owner,
 		a.Stage,
 		a.UpdateScope,
+		allowlist,
 		factory.CreateStaticFilters(allowlist),
 		currentDateTime,
 		terminalClaims,

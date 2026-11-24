@@ -6,6 +6,8 @@ package pkg
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -44,4 +46,34 @@ var decisionTaskIDNamespace = uuid.MustParse("8a96832c-8007-4d9a-922c-d9cdbdfeca
 func DeriveDecisionTaskID(owner, repo string) uuid.UUID {
 	seed := fmt.Sprintf("update-go-decision-%s-%s", owner, repo)
 	return uuid.NewSHA1(decisionTaskIDNamespace, []byte(seed))
+}
+
+// staleIgnoreTaskIDNamespace is the UUID5 namespace for stale-ignore tasks.
+// Frozen and deliberately distinct from taskIDNamespace and
+// decisionTaskIDNamespace: a stale-ignore task must never collide with an
+// update task or a decision task.
+var staleIgnoreTaskIDNamespace = uuid.MustParse("4f2a7c1e-9b3d-4c58-8e21-6d0b7a5c9f13")
+
+// DeriveStaleIgnoreTaskID returns a UUID5 over the seed
+// "stale-ignore-<owner>-<repo>-g<generation>-<ids>", where ids is the sorted
+// stale set joined by ",".
+//
+// The generation is part of the identity and only ever increases, so a re-emit
+// past staleReemitInterval mints a record that does not yet exist and therefore
+// actually runs. Resetting the generation to 1 on a set change would be wrong:
+// an oscillating set ({A} -> {A,B} -> {A}) would re-derive the first emission's
+// identifier, the controller would dedup it, and the still-stale A would never
+// be re-filed.
+func DeriveStaleIgnoreTaskID(owner, repo string, generation int, ids []string) uuid.UUID {
+	sorted := make([]string, len(ids))
+	copy(sorted, ids)
+	sort.Strings(sorted)
+	seed := fmt.Sprintf(
+		"stale-ignore-%s-%s-g%d-%s",
+		owner,
+		repo,
+		generation,
+		strings.Join(sorted, ","),
+	)
+	return uuid.NewSHA1(staleIgnoreTaskIDNamespace, []byte(seed))
 }

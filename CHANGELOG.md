@@ -8,6 +8,15 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: add `GitHubClient.GetFile` and parsers for a repo's ignore surfaces (`VULNCHECK_IGNORE` in `Makefile`/`Makefile.precommit`, `.trivyignore`, `.osv-scanner.toml`) so the stale-ignore pass can learn which advisories a repo suppresses without cloning it
+- feat: add `OSVClient.CheckWithdrawn` to classify an advisory ID as withdrawn, legitimate or unresolved, resolving a 404 alias through the cached Go vulnerability index
+- feat: cache resolved OSV verdicts in the cursor under `osv_verdicts` with a per-entry RFC3339 timestamp so unresolved IDs are retried and a steady fleet costs about one OSV request per advisory per day
+- feat: run a stale-ignore pass inside the poll cycle that reads each repo's ignore surfaces, asks OSV whether a suppressed advisory was withdrawn, and files one `github-update-go` task per repo with a stale set, deduplicated by a generation-bearing UUID5 and bounded by per-cycle scan and weekly re-emit throttles
+- feat: add the `ignore_scan_total` counter and the `hack/staleignore-exercise` program that drives the real pass against GitHub and OSV and records its own transcript
+- feat: detect repos whose ignore surfaces suppress an advisory OSV has withdrawn, and file one `github-update-go` task for them — including repos that are current on Go, which the Go-version chain structurally cannot reach (spec 008). The pass runs inside the existing poll cycle behind a 24h per-repo rescan interval and a 10-repo per-cycle cap; it reads `VULNCHECK_IGNORE` from `Makefile`/`Makefile.precommit`, `.trivyignore` and `.osv-scanner.toml`; it resolves each suppressed ID on `api.osv.dev` with Go-index alias resolution so a merged CVE alias is still answered, and caches resolved verdicts in the cursor for 24h. Emission is deduplicated by repo plus a monotonic generation over the sorted stale set, so an unchanged set re-files at most once per 7 days with a new task identifier. Every upstream failure degrades to "no emission".
+
 ## v0.11.2
 
 - fix: file Go-update decision records at phase human_review so UnreachablePhase stops firing on records no Config can claim

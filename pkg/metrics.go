@@ -29,6 +29,13 @@ type Metrics interface {
 	// "go_current" | "auto_update_disabled" | "auto_update_undecided" |
 	// "sha_unchanged" | "open_update_pr" | "emission_in_flight"
 	IncFilterSkipped(reason string)
+
+	// IncIgnoreScan — result: "scanned" | "clean" | "stale" | "unresolved" |
+	// "error" | "rate_limited". One increment per repo that reached the surface
+	// reads ("scanned" as the denominator) plus exactly one outcome increment
+	// ("clean" | "stale" | "unresolved" | "error"), or one "rate_limited" per
+	// aborted pass.
+	IncIgnoreScan(result string)
 }
 
 const metricNamespace = "github_update_go_watcher"
@@ -55,6 +62,14 @@ var (
 		"sha_unchanged",
 		"open_update_pr",
 		"emission_in_flight",
+	}
+	IgnoreScanResults = []string{
+		"scanned",
+		"clean",
+		"stale",
+		"unresolved",
+		"error",
+		"rate_limited",
 	}
 )
 
@@ -109,12 +124,21 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 			},
 			[]string{"reason"},
 		),
+		ignoreScan: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: metricNamespace,
+				Name:      "ignore_scan_total",
+				Help:      "Total number of stale-ignore scans by result",
+			},
+			[]string{"result"},
+		),
 	}
 	registerer.MustRegister(m.pollCycle)
 	registerer.MustRegister(m.published)
 	registerer.MustRegister(m.completed)
 	registerer.MustRegister(m.reposScanned)
 	registerer.MustRegister(m.filterSkipped)
+	registerer.MustRegister(m.ignoreScan)
 
 	// Pre-initialise all label combinations to 0
 	for _, label := range PollCycleResults {
@@ -129,6 +153,9 @@ func NewMetrics(registerer prometheus.Registerer) Metrics {
 	for _, label := range FilterSkipReasons {
 		m.filterSkipped.WithLabelValues(label).Add(0)
 	}
+	for _, label := range IgnoreScanResults {
+		m.ignoreScan.WithLabelValues(label).Add(0)
+	}
 
 	return m
 }
@@ -139,6 +166,7 @@ type metricsImpl struct {
 	completed     *prometheus.CounterVec
 	reposScanned  prometheus.Counter
 	filterSkipped *prometheus.CounterVec
+	ignoreScan    *prometheus.CounterVec
 }
 
 func (m *metricsImpl) IncPollCycle(result string) {
@@ -159,4 +187,8 @@ func (m *metricsImpl) IncReposScanned(n int) {
 
 func (m *metricsImpl) IncFilterSkipped(reason string) {
 	m.filterSkipped.WithLabelValues(reason).Inc()
+}
+
+func (m *metricsImpl) IncIgnoreScan(result string) {
+	m.ignoreScan.WithLabelValues(result).Inc()
 }

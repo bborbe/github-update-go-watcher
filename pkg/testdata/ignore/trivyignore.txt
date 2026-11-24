@@ -1,0 +1,10 @@
+# github.com/docker/docker indirect dep, no fix available via Go modules
+CVE-2026-34040
+CVE-2026-33997
+
+# go.etcd.io/bbolt v1.4.3 dep, no fix available
+CVE-2026-33817
+
+# aws-sdk-go-v2 s3/eventstream DoS, upgrade pending
+GHSA-xmrv-pmrh-hhx2
+GHSA-abcd-efgh-ijkl   # trailing comment is ignored
