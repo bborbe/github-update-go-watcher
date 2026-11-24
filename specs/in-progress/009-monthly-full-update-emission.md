@@ -1,6 +1,7 @@
 ---
-status: draft
-created: "2026-11-24"
+status: approved
+approved: "2026-11-24T21:26:27Z"
+branch: dark-factory/monthly-full-update-emission
 ---
 
 # Summary
