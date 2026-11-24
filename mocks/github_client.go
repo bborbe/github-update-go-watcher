@@ -10,6 +10,21 @@ import (
 )
 
 type GitHubClient struct {
+	GetFileStub        func(context.Context, pkg.Repo, string) ([]byte, error)
+	getFileMutex       sync.RWMutex
+	getFileArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+		arg3 string
+	}
+	getFileReturns struct {
+		result1 []byte
+		result2 error
+	}
+	getFileReturnsOnCall map[int]struct {
+		result1 []byte
+		result2 error
+	}
 	GetGoModStub        func(context.Context, pkg.Repo) ([]byte, error)
 	getGoModMutex       sync.RWMutex
 	getGoModArgsForCall []struct {
@@ -97,6 +112,72 @@ type GitHubClient struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *GitHubClient) GetFile(arg1 context.Context, arg2 pkg.Repo, arg3 string) ([]byte, error) {
+	fake.getFileMutex.Lock()
+	ret, specificReturn := fake.getFileReturnsOnCall[len(fake.getFileArgsForCall)]
+	fake.getFileArgsForCall = append(fake.getFileArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Repo
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.GetFileStub
+	fakeReturns := fake.getFileReturns
+	fake.recordInvocation("GetFile", []interface{}{arg1, arg2, arg3})
+	fake.getFileMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *GitHubClient) GetFileCallCount() int {
+	fake.getFileMutex.RLock()
+	defer fake.getFileMutex.RUnlock()
+	return len(fake.getFileArgsForCall)
+}
+
+func (fake *GitHubClient) GetFileCalls(stub func(context.Context, pkg.Repo, string) ([]byte, error)) {
+	fake.getFileMutex.Lock()
+	defer fake.getFileMutex.Unlock()
+	fake.GetFileStub = stub
+}
+
+func (fake *GitHubClient) GetFileArgsForCall(i int) (context.Context, pkg.Repo, string) {
+	fake.getFileMutex.RLock()
+	defer fake.getFileMutex.RUnlock()
+	argsForCall := fake.getFileArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *GitHubClient) GetFileReturns(result1 []byte, result2 error) {
+	fake.getFileMutex.Lock()
+	defer fake.getFileMutex.Unlock()
+	fake.GetFileStub = nil
+	fake.getFileReturns = struct {
+		result1 []byte
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *GitHubClient) GetFileReturnsOnCall(i int, result1 []byte, result2 error) {
+	fake.getFileMutex.Lock()
+	defer fake.getFileMutex.Unlock()
+	fake.GetFileStub = nil
+	if fake.getFileReturnsOnCall == nil {
+		fake.getFileReturnsOnCall = make(map[int]struct {
+			result1 []byte
+			result2 error
+		})
+	}
+	fake.getFileReturnsOnCall[i] = struct {
+		result1 []byte
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *GitHubClient) GetGoMod(arg1 context.Context, arg2 pkg.Repo) ([]byte, error) {

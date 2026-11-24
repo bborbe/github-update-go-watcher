@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"time"
 
 	"github.com/bborbe/errors"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 )
 
@@ -18,12 +20,32 @@ import (
 // CURSOR_PATH unset.
 const DefaultCursorPath = "/data/cursor.json"
 
+// osvVerdictTTL bounds how long a resolved OSV verdict is reused before the
+// advisory is re-checked. Unresolved verdicts are never cached.
+const osvVerdictTTL = 24 * libtime.Hour
+
 // Cursor is the per-repo head-SHA dedup state.
 //
 // Concurrency: not safe for concurrent use. Exactly one cycle runs at a time,
 // so the file has a single writer — the cycle loads at start and saves at end.
 type Cursor struct {
 	Repos map[string]*RepoState `json:"repos"` // key: Repo.Key(), "github.com/owner/name"
+	// OSVVerdicts caches resolved OSV verdicts by advisory ID (spec 008 DB7).
+	// omitempty so a cursor written by the previous binary loads, and so a
+	// cursor with no verdicts serialises to nothing. An unresolved ID is never
+	// stored here — it is retried on the next cycle.
+	OSVVerdicts map[string]*OSVVerdictEntry `json:"osv_verdicts,omitempty"`
+}
+
+// OSVVerdictEntry is one cached OSV verdict: whether the advisory was withdrawn
+// and when the verdict was recorded (RFC3339, UTC). Only resolved verdicts are
+// cached, so a present entry with Withdrawn=false means "legitimate".
+//
+// Withdrawn deliberately carries no omitempty: an entry that serialised without
+// the key would read back as a different verdict than the one stored.
+type OSVVerdictEntry struct {
+	Withdrawn bool   `json:"withdrawn"`
+	CheckedAt string `json:"checked_at"`
 }
 
 // RepoState is the cursor entry per repo.
@@ -59,6 +81,25 @@ type RepoState struct {
 	// hand-authored "- reemit" repair tasks never carry one.
 	InFlightTarget string `json:"in_flight_target,omitempty"`
 	InFlightSince  string `json:"in_flight_since,omitempty"`
+	// IgnoreScannedAt is when the stale-ignore pass last read this repo's
+	// ignore surfaces (RFC3339, UTC). Absent means "never scanned", which sorts
+	// first in the throttle. It is advanced on every completed scan and on every
+	// eligibility skip, but NOT when the repo was dropped mid-scan, so a failed
+	// read is retried on the next eligible cycle.
+	IgnoreScannedAt string `json:"ignore_scanned_at,omitempty"`
+	// IgnoreStaleIDs is the sorted stale advisory set recorded at the last
+	// emission, joined by ",". Empty means "no stale set recorded" — a repo
+	// whose set became empty has this cleared so a later identical set emits
+	// again.
+	IgnoreStaleIDs string `json:"ignore_stale_ids,omitempty"`
+	// IgnoreStaleGeneration is monotonic per repo and never resets. It is part
+	// of the task identifier, so every emission mints a NEW record instead of an
+	// identity-identical create the controller would dedup into a no-op.
+	IgnoreStaleGeneration int `json:"ignore_stale_generation,omitempty"`
+	// IgnoreStaleEmittedAt is when the recorded set was last emitted (RFC3339,
+	// UTC). Together with IgnoreStaleIDs it bounds the re-emit to one task per
+	// staleReemitInterval while the set is unchanged.
+	IgnoreStaleEmittedAt string `json:"ignore_stale_emitted_at,omitempty"`
 }
 
 // LoadCursor reads cursor state from path.
@@ -120,4 +161,51 @@ func SaveCursor(ctx context.Context, path string, c *Cursor) error {
 		return errors.Wrapf(ctx, err, "rename cursor tmp path=%s", tmp)
 	}
 	return nil
+}
+
+// CachedVerdict returns the cached verdict for id when the entry exists and is
+// younger than ttl. An absent entry, an empty or unparsable CheckedAt, and an
+// entry at or past ttl all report false so the ID is re-resolved.
+func (c *Cursor) CachedVerdict(
+	ctx context.Context,
+	id string,
+	now libtime.DateTime,
+	ttl libtime.Duration,
+) (OSVVerdict, bool) {
+	entry, ok := c.OSVVerdicts[id]
+	if !ok || entry == nil {
+		return "", false
+	}
+	checkedAt, err := libtime.ParseDateTime(ctx, entry.CheckedAt)
+	if err != nil {
+		glog.V(2).Infof(
+			"osv verdict has unparsable checked_at id=%s value=%q err=%v",
+			id,
+			entry.CheckedAt,
+			err,
+		)
+		return "", false
+	}
+	if now.Sub(checkedAt) >= ttl {
+		return "", false
+	}
+	if entry.Withdrawn {
+		return OSVVerdictWithdrawn, true
+	}
+	return OSVVerdictLegitimate, true
+}
+
+// SetVerdict records a resolved verdict for id at now (RFC3339, UTC). An
+// unresolved verdict is never recorded — the caller re-asks next cycle.
+func (c *Cursor) SetVerdict(id string, verdict OSVVerdict, now libtime.DateTime) {
+	if verdict == "" || verdict == OSVVerdictUnresolved {
+		return
+	}
+	if c.OSVVerdicts == nil {
+		c.OSVVerdicts = make(map[string]*OSVVerdictEntry)
+	}
+	c.OSVVerdicts[id] = &OSVVerdictEntry{
+		Withdrawn: verdict == OSVVerdictWithdrawn,
+		CheckedAt: now.Format(time.RFC3339),
+	}
 }

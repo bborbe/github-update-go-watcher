@@ -6,6 +6,7 @@ package pkg
 
 import (
 	"context"
+	"strings"
 
 	"github.com/bborbe/agent/command/task"
 	"github.com/golang/glog"
@@ -19,6 +20,15 @@ import (
 type TaskPublisher interface {
 	PublishCreate(ctx context.Context, candidate Candidate) bool
 	PublishDecision(ctx context.Context, candidate Candidate) bool
+	// PublishStaleIgnore builds and sends the stale-ignore CreateTaskCommand.
+	// Returns true only on a successful send — the caller records the emission
+	// in the cursor only on true.
+	PublishStaleIgnore(
+		ctx context.Context,
+		candidate Candidate,
+		finding StaleIgnoreFinding,
+		generation int,
+	) bool
 }
 
 // NewTaskPublisher returns a TaskPublisher wrapping the given sender + metrics.
@@ -60,6 +70,36 @@ func (p *taskPublisher) PublishCreate(
 		"published CreateTaskCommand repo=%s sha=%s taskID=%s stage=%s",
 		candidate.Repo.Key(),
 		candidate.HeadSHA,
+		string(cmd.TaskIdentifier),
+		p.cfg.Stage,
+	)
+	p.metrics.IncPublished("create")
+	return true
+}
+
+func (p *taskPublisher) PublishStaleIgnore(
+	ctx context.Context,
+	candidate Candidate,
+	finding StaleIgnoreFinding,
+	generation int,
+) bool {
+	cmd := BuildStaleIgnoreCommand(candidate, finding, generation, p.cfg)
+	if err := p.sender.SendCommand(ctx, cmd); err != nil {
+		glog.Errorf(
+			"publish stale-ignore task failed repo=%s generation=%d taskID=%s err=%v",
+			candidate.Repo.Key(),
+			generation,
+			string(cmd.TaskIdentifier),
+			err,
+		)
+		p.metrics.IncPublished("error")
+		return false
+	}
+	glog.V(2).Infof(
+		"published StaleIgnoreCommand repo=%s stale_ids=%s generation=%d taskID=%s stage=%s",
+		candidate.Repo.Key(),
+		strings.Join(finding.IDs, ","),
+		generation,
 		string(cmd.TaskIdentifier),
 		p.cfg.Stage,
 	)

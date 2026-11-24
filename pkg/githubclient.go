@@ -62,6 +62,13 @@ type GitHubClient interface {
 	// 5xx, oversize, base64 decode) returns a wrapped error and drops the repo.
 	GetGoMod(ctx context.Context, repo Repo) ([]byte, error)
 
+	// GetFile returns the raw bytes of path at HEAD of repo's default branch.
+	// Returns (nil, nil) when the file does not exist (HTTP 404) — an absent
+	// ignore surface is empty, not an error. Returns (nil, ErrRateLimited) on
+	// primary or abuse rate limiting. Every other failure (network, 5xx,
+	// oversize, base64 decode) returns a wrapped error and drops the repo.
+	GetFile(ctx context.Context, repo Repo, path string) ([]byte, error)
+
 	// GetMaintainerConfig returns the parsed consent verdict from
 	// `.maintainer.yaml` at HEAD of repo's default branch (spec 002 Desired
 	// Behavior 1). This file is the repo owner's consent record.
@@ -291,6 +298,45 @@ func (c *githubClient) GetGoMod(ctx context.Context, repo Repo) ([]byte, error) 
 		return nil, errors.Errorf(
 			ctx, "go.mod %s decoded too large: %d bytes (max %d)",
 			repo.String(), len(decoded), maxContentBytes,
+		)
+	}
+	return []byte(decoded), nil
+}
+
+// GetFile implements GitHubClient.
+func (c *githubClient) GetFile(ctx context.Context, repo Repo, path string) ([]byte, error) {
+	opts := &gogithub.RepositoryContentGetOptions{Ref: repo.DefaultBranch}
+	fileContent, _, _, err := c.client.Repositories.GetContents(
+		ctx, repo.Owner, repo.Name, path, opts,
+	)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
+		if isRateLimitError(err) {
+			return nil, ErrRateLimited
+		}
+		return nil, errors.Wrapf(
+			ctx, err, "get %s %s ref=%s", path, repo.String(), repo.DefaultBranch,
+		)
+	}
+	if fileContent == nil {
+		return nil, nil
+	}
+	if fileContent.GetSize() > maxContentBytes {
+		return nil, errors.Errorf(
+			ctx, "%s %s too large: %d bytes (max %d)",
+			path, repo.String(), fileContent.GetSize(), maxContentBytes,
+		)
+	}
+	decoded, err := fileContent.GetContent()
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "decode %s %s", path, repo.String())
+	}
+	if len(decoded) > maxContentBytes {
+		return nil, errors.Errorf(
+			ctx, "%s %s decoded too large: %d bytes (max %d)",
+			path, repo.String(), len(decoded), maxContentBytes,
 		)
 	}
 	return []byte(decoded), nil

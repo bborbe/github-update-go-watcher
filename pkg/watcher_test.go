@@ -74,6 +74,8 @@ var _ = Describe("watcher", func() {
 			taskFilter,
 			currentDateTime,
 			terminalClaims,
+			&mocks.OSVClient{},
+			allowlist,
 		)
 	}
 
@@ -1107,6 +1109,8 @@ var _ = Describe("emission claim (spec 005)", func() {
 			},
 			currentDateTime,
 			terminalClaims,
+			&mocks.OSVClient{},
+			[]string{"github.com/bborbe/disk-status"},
 		)
 	})
 
@@ -1244,6 +1248,8 @@ var _ = Describe("emission claim (spec 005)", func() {
 			},
 			currentDateTime,
 			store,
+			&mocks.OSVClient{},
+			[]string{repoKey},
 		)
 
 		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
