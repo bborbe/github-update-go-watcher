@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.12.1
 
 - chore: remove 8 stale vulnerability ignore IDs
 - ci: install Trivy from a pinned, checksum-verified release tarball so the test job stops failing on the removed `apt-key` helper
