@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.13.0
 
 - fix: Retry GitHub rate-limit responses with the server's requested delay instead of aborting the poll cycle, and bound concurrent GitHub requests at 4 so retries cannot worsen a secondary limit
 - feat: Add `GITHUB_API_BASE_URL` to point the watcher at a test server or a GitHub Enterprise API root
