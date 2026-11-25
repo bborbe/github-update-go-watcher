@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
@@ -51,7 +52,12 @@ var _ = Describe("HTTP Endpoints", func() {
 			pkg.NewMetrics(prometheus.DefaultRegisterer)
 		})
 
-		triggerHandler := factory.CreateTriggerHandler(baseCtx, watcherFake, gate)
+		triggerHandler := factory.CreateTriggerHandler(
+			baseCtx,
+			watcherFake,
+			gate,
+			libtime.NewCurrentDateTime(),
+		)
 		router := factory.CreateRouter(baseCtx, triggerHandler, nil)
 		server = httptest.NewServer(router)
 	})
@@ -178,14 +184,15 @@ var _ = Describe("HTTP Endpoints", func() {
 type fakeCall struct {
 	ctx   context.Context
 	force bool
+	month string
 }
 
 type fakeWatcher struct {
 	calls chan fakeCall
 }
 
-func (w *fakeWatcher) Poll(ctx context.Context, force bool) error {
-	w.calls <- fakeCall{ctx: ctx, force: force}
+func (w *fakeWatcher) Poll(ctx context.Context, force bool, month string) error {
+	w.calls <- fakeCall{ctx: ctx, force: force, month: month}
 	return nil
 }
 

@@ -60,6 +60,35 @@ func buildFrontmatter(
 	return baseFrontmatter(c, ComputeTaskTitle(c), taskIDStr, cfg)
 }
 
+// ComputeMonthlyTaskTitle returns the frozen monthly title form:
+// "Monthly Deps Update <owner>-<repo> <YYYY-MM>".
+//
+// Dash form for the same reason as ComputeTaskTitle: CreateCommand.Validate
+// rejects any '/' in a title.
+func ComputeMonthlyTaskTitle(c Candidate, month string) string {
+	return fmt.Sprintf(
+		"Monthly Deps Update %s-%s %s",
+		c.Repo.Owner,
+		c.Repo.Name,
+		month,
+	)
+}
+
+// BuildMonthlyCreateCommand assembles the monthly CreateTaskCommand for a
+// Candidate. It carries the same envelope as the Go-version task plus the
+// mandatory update_month frontmatter the month gate and the probes read.
+func BuildMonthlyCreateCommand(c Candidate, cfg TaskConfig, month string) task.CreateCommand {
+	taskIDStr := DeriveMonthlyTaskID(c.Repo.Owner, c.Repo.Name, month).String()
+	frontmatter := baseFrontmatter(c, ComputeMonthlyTaskTitle(c, month), taskIDStr, cfg)
+	frontmatter["update_month"] = month
+	return task.CreateCommand{
+		Title:          ComputeMonthlyTaskTitle(c, month),
+		TaskIdentifier: agentlib.TaskIdentifier(taskIDStr),
+		Frontmatter:    frontmatter,
+		Body:           buildTaskBody(c),
+	}
+}
+
 // baseFrontmatter builds the frozen task envelope shared by every create task.
 // Only the title, the identifier and the body vary between task kinds.
 func baseFrontmatter(

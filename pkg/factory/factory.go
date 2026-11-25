@@ -179,8 +179,9 @@ func CreateTriggerHandler(
 	ctx context.Context,
 	watcher pkg.Watcher,
 	gate pkg.CycleGate,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) http.Handler {
-	return handler.NewTriggerHandlerHTTPAdapter(ctx, watcher, gate)
+	return handler.NewTriggerHandlerHTTPAdapter(ctx, watcher, gate, currentDateTimeGetter)
 }
 
 // CreateRouter builds the full HTTP route table. main.go's createHTTPServer

@@ -33,6 +33,19 @@ type TaskPublisher struct {
 	publishDecisionReturnsOnCall map[int]struct {
 		result1 bool
 	}
+	PublishMonthlyStub        func(context.Context, pkg.Candidate, string) bool
+	publishMonthlyMutex       sync.RWMutex
+	publishMonthlyArgsForCall []struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+		arg3 string
+	}
+	publishMonthlyReturns struct {
+		result1 bool
+	}
+	publishMonthlyReturnsOnCall map[int]struct {
+		result1 bool
+	}
 	PublishStaleIgnoreStub        func(context.Context, pkg.Candidate, pkg.StaleIgnoreFinding, int) bool
 	publishStaleIgnoreMutex       sync.RWMutex
 	publishStaleIgnoreArgsForCall []struct {
@@ -171,6 +184,69 @@ func (fake *TaskPublisher) PublishDecisionReturnsOnCall(i int, result1 bool) {
 		})
 	}
 	fake.publishDecisionReturnsOnCall[i] = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishMonthly(arg1 context.Context, arg2 pkg.Candidate, arg3 string) bool {
+	fake.publishMonthlyMutex.Lock()
+	ret, specificReturn := fake.publishMonthlyReturnsOnCall[len(fake.publishMonthlyArgsForCall)]
+	fake.publishMonthlyArgsForCall = append(fake.publishMonthlyArgsForCall, struct {
+		arg1 context.Context
+		arg2 pkg.Candidate
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.PublishMonthlyStub
+	fakeReturns := fake.publishMonthlyReturns
+	fake.recordInvocation("PublishMonthly", []interface{}{arg1, arg2, arg3})
+	fake.publishMonthlyMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *TaskPublisher) PublishMonthlyCallCount() int {
+	fake.publishMonthlyMutex.RLock()
+	defer fake.publishMonthlyMutex.RUnlock()
+	return len(fake.publishMonthlyArgsForCall)
+}
+
+func (fake *TaskPublisher) PublishMonthlyCalls(stub func(context.Context, pkg.Candidate, string) bool) {
+	fake.publishMonthlyMutex.Lock()
+	defer fake.publishMonthlyMutex.Unlock()
+	fake.PublishMonthlyStub = stub
+}
+
+func (fake *TaskPublisher) PublishMonthlyArgsForCall(i int) (context.Context, pkg.Candidate, string) {
+	fake.publishMonthlyMutex.RLock()
+	defer fake.publishMonthlyMutex.RUnlock()
+	argsForCall := fake.publishMonthlyArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *TaskPublisher) PublishMonthlyReturns(result1 bool) {
+	fake.publishMonthlyMutex.Lock()
+	defer fake.publishMonthlyMutex.Unlock()
+	fake.PublishMonthlyStub = nil
+	fake.publishMonthlyReturns = struct {
+		result1 bool
+	}{result1}
+}
+
+func (fake *TaskPublisher) PublishMonthlyReturnsOnCall(i int, result1 bool) {
+	fake.publishMonthlyMutex.Lock()
+	defer fake.publishMonthlyMutex.Unlock()
+	fake.PublishMonthlyStub = nil
+	if fake.publishMonthlyReturnsOnCall == nil {
+		fake.publishMonthlyReturnsOnCall = make(map[int]struct {
+			result1 bool
+		})
+	}
+	fake.publishMonthlyReturnsOnCall[i] = struct {
 		result1 bool
 	}{result1}
 }

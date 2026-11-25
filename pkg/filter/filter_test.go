@@ -254,6 +254,14 @@ var _ = Describe("SHAUnchangedFilter", func() {
 type fakeCursor struct {
 	shas       map[string]string
 	goVersions map[string]string
+	months     map[string]string
+}
+
+func (f *fakeCursor) LastMonthlyMonth(repoKey string) string {
+	if f.months == nil {
+		return ""
+	}
+	return f.months[repoKey]
 }
 
 func (f *fakeCursor) LastSeenSHA(repoKey string) string {
@@ -276,6 +284,7 @@ var _ = Describe("Closed set assertion", func() {
 			"go_current":           true,
 			"auto_update_disabled": true,
 			"sha_unchanged":        true,
+			"month_unchanged":      true,
 		}
 		candidate := filter.Candidate{
 			RepoKey:       "github.com/bborbe/repo",
@@ -292,6 +301,7 @@ var _ = Describe("Closed set assertion", func() {
 			filter.NewGoBehindFilter(),
 			filter.NewAutoUpdateFilter(),
 			filter.NewSHAUnchangedFilter(&fakeCursor{}),
+			filter.NewMonthUnchangedFilter(&fakeCursor{}, "2026-11"),
 		}
 		for _, f := range filters {
 			reason := f.Skip(candidate)

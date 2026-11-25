@@ -30,6 +30,24 @@ func DeriveTaskID(owner, repo, goVersion, headSHA string) uuid.UUID {
 	return uuid.NewSHA1(taskIDNamespace, []byte(seed))
 }
 
+// monthlyTaskIDNamespace is the UUID5 namespace for monthly full-update tasks.
+// Derived once at init from the frozen taskIDNamespace, so it is deterministic
+// and additive: the existing namespaces and seeds are untouched, and a re-emit
+// of the same repo+month is always the same identifier.
+var monthlyTaskIDNamespace = uuid.NewSHA1(taskIDNamespace, []byte("github-update-go-monthly"))
+
+// DeriveMonthlyTaskID returns a UUID5 derived deterministically from
+// (owner, repo, month) via the seed "update-go-month-<owner>-<repo>-<month>".
+//
+// month is the calendar month in YYYY-MM form. The same repo in the same month
+// always yields the same identifier, so a re-emit is a downstream no-op; a new
+// month yields a new identifier, so the next month emits again. The namespace
+// and seed prefix are distinct from every other task kind.
+func DeriveMonthlyTaskID(owner, repo, month string) uuid.UUID {
+	seed := fmt.Sprintf("update-go-month-%s-%s-%s", owner, repo, month)
+	return uuid.NewSHA1(monthlyTaskIDNamespace, []byte(seed))
+}
+
 // decisionTaskIDNamespace is the UUID5 namespace for decision tasks.
 // Frozen and deliberately distinct from taskIDNamespace — decision tasks
 // and update tasks must never collide.

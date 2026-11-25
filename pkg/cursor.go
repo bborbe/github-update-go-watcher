@@ -100,6 +100,35 @@ type RepoState struct {
 	// UTC). Together with IgnoreStaleIDs it bounds the re-emit to one task per
 	// staleReemitInterval while the set is unchanged.
 	IgnoreStaleEmittedAt string `json:"ignore_stale_emitted_at,omitempty"`
+	// LastMonthlyMonth is the calendar month (YYYY-MM) for which this repo's
+	// monthly full-update task was last published. It is written only after a
+	// successful publish, so a failed send is retried on the next cycle.
+	// omitempty so a cursor written by the previous binary loads unchanged.
+	LastMonthlyMonth string `json:"last_monthly_month,omitempty"`
+}
+
+// LastMonthlyMonth returns the month (YYYY-MM) recorded for repoKey, or "" when
+// the repo has no recorded monthly emission.
+func (c *Cursor) LastMonthlyMonth(repoKey string) string {
+	entry, ok := c.Repos[repoKey]
+	if !ok || entry == nil {
+		return ""
+	}
+	return entry.LastMonthlyMonth
+}
+
+// SetLastMonthlyMonth records month as the repo's last monthly emission,
+// preserving every other field of its state.
+func (c *Cursor) SetLastMonthlyMonth(repoKey, month string) {
+	if c.Repos == nil {
+		c.Repos = make(map[string]*RepoState)
+	}
+	entry, ok := c.Repos[repoKey]
+	if !ok || entry == nil {
+		entry = &RepoState{}
+		c.Repos[repoKey] = entry
+	}
+	entry.LastMonthlyMonth = month
 }
 
 // LoadCursor reads cursor state from path.

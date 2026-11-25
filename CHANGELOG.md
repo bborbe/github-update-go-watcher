@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- feat: emit one monthly full dependency-update task per consent-granted repo, regardless of Go version or HEAD movement (`update_month` frontmatter, month-keyed task identity, `month_unchanged` skip reason, `POST /trigger?monthly=1&month=YYYY-MM`)
+
 ## v0.13.0
 
 - fix: Retry GitHub rate-limit responses with the server's requested delay instead of aborting the poll cycle, and bound concurrent GitHub requests at 4 so retries cannot worsen a secondary limit
