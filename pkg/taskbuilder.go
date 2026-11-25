@@ -75,12 +75,13 @@ func ComputeMonthlyTaskTitle(c Candidate, month string) string {
 }
 
 // BuildMonthlyCreateCommand assembles the monthly CreateTaskCommand for a
-// Candidate. It carries the same envelope as the Go-version task plus the
-// mandatory update_month frontmatter the month gate and the probes read.
+// Candidate. It carries the same envelope as the Go-version task; the month is
+// carried by the title and by the month-keyed identifier, not by a frontmatter
+// field — the task store rejects unknown frontmatter keys, so the month must
+// ride in fields the store already accepts.
 func BuildMonthlyCreateCommand(c Candidate, cfg TaskConfig, month string) task.CreateCommand {
 	taskIDStr := DeriveMonthlyTaskID(c.Repo.Owner, c.Repo.Name, month).String()
 	frontmatter := baseFrontmatter(c, ComputeMonthlyTaskTitle(c, month), taskIDStr, cfg)
-	frontmatter["update_month"] = month
 	return task.CreateCommand{
 		Title:          ComputeMonthlyTaskTitle(c, month),
 		TaskIdentifier: agentlib.TaskIdentifier(taskIDStr),

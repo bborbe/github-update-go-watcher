@@ -38,7 +38,7 @@ The watcher, unattended, files exactly one `github-update-go` task per repo per 
 
 # Acceptance Criteria
 
-- [ ] A monthly pass emits exactly one task for a repo that is Go-current and whose HEAD is unchanged. Evidence: the test asserts one published command whose frontmatter carries `update_month: <YYYY-MM>` and whose `task_identifier` equals the value the monthly identity function derives for (owner, repo, month).
+- [ ] A monthly pass emits exactly one task for a repo that is Go-current and whose HEAD is unchanged. Evidence: the test asserts one published command whose title is `Monthly Deps Update <owner>-<repo> <YYYY-MM>` and whose `task_identifier` equals the value the monthly identity function derives for (owner, repo, month). The month must NOT be a frontmatter field: the task store rejects unknown keys with `400 unknown_field` (measured 2026-11-25 on dev).
 - [ ] A second monthly pass in the same month publishes nothing for that repo and logs the literal `month_unchanged` exactly once per repo per cycle. Evidence: the test asserts zero publishes and a log with one `month_unchanged` line per repo — `grep -c month_unchanged <log>` equals the repo count (2 for a two-repo fixture), not merely ≥ 1.
 - [ ] A monthly pass for the next month emits again for the same repo. Evidence: the test runs the pass for `M` then `M+1` with HEAD unchanged and asserts one publish in each, with distinct `task_identifier`s.
 - [ ] The monthly identifier is deterministic, month-scoped and namespace-separated. Evidence: the test asserts the same identifier for repeated (owner, repo, month), a different one across two months, a UUID version-5 string, and a value different from the Go-version identity for the same inputs.
@@ -61,7 +61,7 @@ The watcher, unattended, files exactly one `github-update-go` task per repo per 
 
 - Resolve the dev service endpoint (namespace `agent`, service `github-update-go-watcher`, port 9090) and POST through the Kubernetes API-server proxy per [[Kubectl Pod Proxy Pattern]]:
   - `kubectlnukedev -n agent get --raw '/api/v1/namespaces/agent/services/http:github-update-go-watcher:9090/proxy/trigger?monthly=1&month=<YYYY-MM>'` returns 202.
-- The `openclaw` task store gains one `github-update-go` task per gate-passing repo carrying `update_month: <YYYY-MM>`.
+- The `openclaw` task store gains one `github-update-go` task per gate-passing repo, titled `Monthly Deps Update <owner>-<repo> <YYYY-MM>`.
 - A second call with the same month returns 202 and the task count is unchanged.
 - A call with `month=<next YYYY-MM>` emits again.
 
@@ -70,7 +70,7 @@ The watcher, unattended, files exactly one `github-update-go` task per repo per 
 1. The watcher's poll cycle accepts a month. An empty month preserves today's behaviour exactly; a non-empty month additionally runs a monthly pass over the same candidate list.
 2. The monthly pass keeps the allowlist, `go.mod` present/parsable and consent gates, and does not use the Go-behind filter or the HEAD-unchanged filter.
 3. A repo whose cursor already records the current month is skipped with the reason `month_unchanged`; the reason surfaces through the existing skip-log path, exactly once per repo per cycle.
-4. A repo that passes the monthly chain gets a task titled `Monthly Deps Update <owner>-<repo> <YYYY-MM>` with `update_month` frontmatter, and the cursor records the month after a successful publish only.
+4. A repo that passes the monthly chain gets a task titled `Monthly Deps Update <owner>-<repo> <YYYY-MM>` (the month is carried by the title and the identifier, never by a frontmatter key the store would reject), and the cursor records the month after a successful publish only.
 5. The monthly task identifier is deterministic, month-scoped, and namespace-separated from the Go-version, decision and stale-ignore identities.
 6. `POST /trigger?monthly=1[&month=YYYY-MM]` runs a monthly pass; `month` defaults to the current UTC calendar month; a malformed month, or one more than one month away from the current UTC month, returns 400 and runs nothing.
 7. A repo may legitimately receive both a Go-version task and a monthly task in the same month.
@@ -107,7 +107,7 @@ The watcher, unattended, files exactly one `github-update-go` task per repo per 
 
 | # | Prompt focus | Covers DBs | Covers ACs | Depends on |
 |---|---|---|---|---|
-| 1 | Monthly task identity + task builder + `update_month` frontmatter | 4, 5 | 1, 4, 5 | — |
+| 1 | Monthly task identity + task builder (month in the title, no frontmatter field) | 4, 5 | 1, 4, 5 | — |
 | 2 | Cursor month state + `month_unchanged` filter | 3, 4 | 2, 3 | prompt 1 |
 | 3 | Watcher `Poll` month parameter + poll-loop wiring | 1, 2, 7 | 1, 2, 3, 8, 9 | prompts 1, 2 |
 | 4 | Trigger handler `monthly`/`month` parameters, validation and UTC default | 6 | 6, 7 | prompt 3 |
