@@ -98,7 +98,7 @@ func run(repoArg, transcriptPath string) int {
 	metrics := pkg.NewMetrics(registry)
 	publisher := &printingPublisher{out: transcript}
 	pass := pkg.NewStaleIgnorePass(
-		pkg.NewGitHubClient(githubHTTP),
+		pkg.NewGitHubClient(githubHTTP, ""),
 		osvClient,
 		publisher,
 		metrics,

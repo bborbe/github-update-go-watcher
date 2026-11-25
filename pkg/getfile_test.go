@@ -39,7 +39,7 @@ var _ = Describe("GetFile", func() {
 
 	newClient := func(handler http.HandlerFunc) {
 		server = httptest.NewServer(handler)
-		client = pkg.NewGitHubClient(server.Client())
+		client = pkg.NewGitHubClient(server.Client(), "")
 		Expect(pkg.SetBaseURL(client, server.URL+"/")).To(Succeed())
 	}
 
