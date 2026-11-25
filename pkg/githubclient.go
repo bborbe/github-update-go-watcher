@@ -8,9 +8,11 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/bborbe/errors"
+	libhttp "github.com/bborbe/http"
 	"github.com/golang/glog"
 	gogithub "github.com/google/go-github/v84/github"
 
@@ -36,6 +38,12 @@ const maxListPages = 100
 // gate (HasOpenUpdatePR) and the merged-PR completion pass (GetMergedUpdatePR)
 // build branches from it. Kept in sync with the agent's branchPrefix.
 const updateBranchPrefix = "fix/update-go-"
+
+// githubAPIInflightBound caps how many GitHub API requests this client keeps in
+// flight at once. GitHub's secondary rate limit is a concurrency heuristic, so
+// bounding in-flight requests keeps a burst of retries from making a secondary
+// limit worse.
+const githubAPIInflightBound = 4
 
 //counterfeiter:generate -o ../mocks/github_client.go --fake-name GitHubClient . GitHubClient
 
@@ -122,16 +130,70 @@ type GitHubClient interface {
 // The client's transport is wrapped so every non-2xx GitHub API response emits
 // one structured log line (see non2xx_log.go), which is what makes primary
 // quota exhaustion distinguishable from secondary rate limiting in pod logs.
-func NewGitHubClient(httpClient *http.Client) GitHubClient {
+// It also retries rate-limited responses with the delay the server asks for
+// and bounds how many requests are in flight at once.
+//
+// apiBaseURL, when non-empty, points the go-github client at a different API
+// root (a test server or a GitHub Enterprise host). An unparsable value logs a
+// warning and keeps the default.
+func NewGitHubClient(httpClient *http.Client, apiBaseURL string) GitHubClient {
+	return newGitHubClient(httpClient, apiBaseURL, logNon2xxV2)
+}
+
+// newGitHubClient builds the production client with an injectable non-2xx log
+// sink, so a test can assert the logging wrapper survives a re-wrap.
+func newGitHubClient(
+	httpClient *http.Client,
+	apiBaseURL string,
+	log func(string),
+) GitHubClient {
 	inner := httpClient.Transport
 	if inner == nil {
 		inner = http.DefaultTransport
 	}
-	httpClient.Transport = &non2xxLoggingTransport{
-		inner: inner,
-		log:   logNon2xxV2,
+	limit := libhttp.NewRoundTripperLimitConcurrency(inner, githubAPIInflightBound, nil)
+	capture := &non2xxLoggingTransport{
+		inner: limit,
+		log:   log,
 	}
-	return &githubClient{client: gogithub.NewClient(httpClient)}
+	httpClient.Transport = libhttp.NewRoundTripperRetryWithBackoff(
+		capture,
+		libhttp.RetryBackoffOptions{RetryHosts: retryHostsFor(apiBaseURL)},
+	)
+	client := gogithub.NewClient(httpClient)
+	applyAPIBaseURL(client, apiBaseURL)
+	return &githubClient{client: client}
+}
+
+// retryHostsFor returns the host whose rate-limit responses are retried. A nil
+// result lets the library fall back to its api.github.com default.
+func retryHostsFor(apiBaseURL string) []string {
+	if apiBaseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(apiBaseURL)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	return []string{u.Hostname()}
+}
+
+// applyAPIBaseURL points client at apiBaseURL, adding the trailing slash
+// go-github requires on a base URL. An unparsable value logs a warning and
+// leaves the default in place.
+func applyAPIBaseURL(client *gogithub.Client, apiBaseURL string) {
+	if apiBaseURL == "" {
+		return
+	}
+	u, err := url.Parse(apiBaseURL)
+	if err != nil {
+		glog.Warningf("invalid api-base-url %q, keeping default: %v", apiBaseURL, err)
+		return
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+	}
+	client.BaseURL = u
 }
 
 type githubClient struct {

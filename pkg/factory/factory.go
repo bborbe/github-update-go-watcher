@@ -143,8 +143,9 @@ func CreateWatcher(
 	taskCreationFilter filter.TaskCreationFilter,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	terminalClaims pkg.TerminalClaims,
+	apiBaseURL string,
 ) pkg.Watcher {
-	ghClient := pkg.NewGitHubClient(githubHTTPClient)
+	ghClient := pkg.NewGitHubClient(githubHTTPClient, apiBaseURL)
 	goDevClient := pkg.NewGoDevClient(goDevHTTPClient, pkg.DefaultGoDevURL)
 	publisher := pkg.NewTaskPublisher(sender, metrics, pkg.TaskConfig{
 		Stage:       stage,

@@ -75,6 +75,7 @@ Implemented. Not yet deployed — deployment (the Helm chart in `bborbe/nuke`) i
 | `APP_ID` | yes* | — | GitHub App ID |
 | `INSTALLATION_ID` | yes* | — | GitHub App Installation ID |
 | `PEM_KEY` | yes* | — | GitHub App PEM key (populated from a k8s Secret; never logged) |
+| `GITHUB_API_BASE_URL` | no | `https://api.github.com` | GitHub API base URL (a test server or a GitHub Enterprise host) |
 | `SENTRY_DSN` | no | — | Sentry DSN for error reporting |
 
 \* `APP_ID`, `INSTALLATION_ID`, and `PEM_KEY` are each individually marked `required:"false"` on the binary's argument struct (so the process can start and print `--help` without them), but `ResolveGitHubClient` refuses to run without all three set — the binary fails at startup with "GitHub App credentials not configured" if any is missing. Set all three or none.

@@ -51,9 +51,10 @@ type application struct {
 
 	TopicPrefix base.TopicPrefix `required:"false" arg:"topic-prefix" env:"TOPIC_PREFIX" usage:"Kafka topic prefix for CQRS topic construction"`
 
-	AppID          int64  `required:"false" arg:"app-id"          env:"APP_ID"          usage:"GitHub App ID"`
-	InstallationID int64  `required:"false" arg:"installation-id" env:"INSTALLATION_ID" usage:"GitHub App Installation ID"`
-	PEMKey         string `required:"false" arg:"pem-key"         env:"PEM_KEY"         usage:"GitHub App PEM key (populated from a k8s Secret)" display:"length"`
+	AppID          int64  `required:"false" arg:"app-id"          env:"APP_ID"              usage:"GitHub App ID"`
+	InstallationID int64  `required:"false" arg:"installation-id" env:"INSTALLATION_ID"     usage:"GitHub App Installation ID"`
+	PEMKey         string `required:"false" arg:"pem-key"         env:"PEM_KEY"             usage:"GitHub App PEM key (populated from a k8s Secret)"         display:"length"`
+	APIBaseURL     string `required:"false" arg:"api-base-url"    env:"GITHUB_API_BASE_URL" usage:"GitHub API base URL (defaults to https://api.github.com)"`
 
 	BuildGitVersion string            `required:"false" arg:"build-git-version" env:"BUILD_GIT_VERSION" usage:"Build Git version"         default:"dev"`
 	BuildGitCommit  string            `required:"false" arg:"build-git-commit"  env:"BUILD_GIT_COMMIT"  usage:"Build Git commit hash"     default:"none"`
@@ -80,11 +81,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		glog.V(2).Infof("repo-allowlist count=%d", len(allowlist))
 	}
 
-	httpClient, err := auth.ResolveGitHubClient(ctx, auth.Credentials{
-		AppID:          a.AppID,
-		InstallationID: a.InstallationID,
-		PEMKey:         []byte(a.PEMKey),
-	})
+	httpClient, err := a.resolveGitHubClient(ctx)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "resolve GitHub client")
 	}
@@ -132,6 +129,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		factory.CreateStaticFilters(allowlist),
 		currentDateTime,
 		terminalClaims,
+		a.APIBaseURL,
 	)
 	gate := pkg.NewCycleGate()
 	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate)
@@ -153,6 +151,15 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	)
 }
 
+func (a *application) resolveGitHubClient(ctx context.Context) (*http.Client, error) {
+	return auth.ResolveGitHubClient(ctx, auth.Credentials{
+		AppID:          a.AppID,
+		InstallationID: a.InstallationID,
+		PEMKey:         []byte(a.PEMKey),
+		BaseURL:        a.APIBaseURL,
+	})
+}
+
 func (a *application) pollLoop(
 	w pkg.Watcher,
 	gate pkg.CycleGate,
@@ -164,6 +171,7 @@ func (a *application) pollLoop(
 			return
 		}
 		defer gate.Release()
+		glog.V(2).Infof("poll cycle start stage=%s", a.Stage)
 		if err := w.Poll(ctx, false); err != nil {
 			glog.Errorf("poll: %v", err)
 		}

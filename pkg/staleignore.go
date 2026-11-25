@@ -114,7 +114,8 @@ func (p *staleIgnorePass) scanRepo(
 	}
 
 	state := repoState(cursorState, repo)
-	if !candidate.GoModPresent || !candidate.GoModParsable || candidate.Consent != filter.GrantedConsent {
+	if !candidate.GoModPresent || !candidate.GoModParsable ||
+		candidate.Consent != filter.GrantedConsent {
 		reason := "no_gomod"
 		switch {
 		case candidate.GoModPresent && !candidate.GoModParsable:
