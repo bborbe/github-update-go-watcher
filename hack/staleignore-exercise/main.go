@@ -314,6 +314,21 @@ func (p *printingPublisher) PublishDecision(context.Context, pkg.Candidate) bool
 	return false
 }
 
+func (p *printingPublisher) PublishMonthly(
+	_ context.Context,
+	candidate pkg.Candidate,
+	month string,
+) bool {
+	cmd := pkg.BuildMonthlyCreateCommand(candidate, pkg.TaskConfig{Stage: "exercise"}, month)
+	encoded, err := json.Marshal(cmd)
+	if err != nil {
+		p.out.printf("error: marshal monthly command: %v\n", err)
+		return false
+	}
+	p.out.printf("monthly_task=%s\n", string(encoded))
+	return true
+}
+
 func (p *printingPublisher) PublishStaleIgnore(
 	_ context.Context,
 	candidate pkg.Candidate,

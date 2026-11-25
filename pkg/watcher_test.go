@@ -99,7 +99,7 @@ var _ = Describe("watcher", func() {
 					publisher.PublishCreateReturns(true)
 					metrics.IncFilterSkippedStub = func(string) {}
 
-					err := watcher.Poll(context.Background(), false)
+					err := watcher.Poll(context.Background(), false, "")
 					Expect(err).NotTo(HaveOccurred())
 
 					if expectPublish {
@@ -135,7 +135,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				buildWatcher()
 
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 
 				// GoBehindFilter (chain position 4) short-circuits before the consent
 				// filter (position 5), so the verdict is go_current, not
@@ -163,7 +163,7 @@ var _ = Describe("watcher", func() {
 
 			It("publishes exactly one decision task and zero update tasks", func() {
 				publisher.PublishDecisionReturns(true)
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishDecisionCallCount()).To(Equal(1))
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
@@ -171,7 +171,7 @@ var _ = Describe("watcher", func() {
 
 			It("records reason auto_update_undecided", func() {
 				publisher.PublishDecisionReturns(true)
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
 				arg := metrics.IncFilterSkippedArgsForCall(0)
 				Expect(arg).To(Equal("auto_update_undecided"))
@@ -179,7 +179,7 @@ var _ = Describe("watcher", func() {
 
 			It("a failed decision publish does not fail the poll cycle", func() {
 				publisher.PublishDecisionReturns(false)
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -204,7 +204,7 @@ var _ = Describe("watcher", func() {
 					ghClient.GetGoModReturns(goModContent, nil)
 					metrics.IncFilterSkippedStub = func(string) {}
 
-					err := watcher.Poll(context.Background(), false)
+					err := watcher.Poll(context.Background(), false, "")
 					Expect(err).NotTo(HaveOccurred())
 
 					if expectPublish {
@@ -270,7 +270,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("calls LatestStable exactly once", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(goDevClient.LatestStableCallCount()).To(Equal(1))
 			})
@@ -283,17 +283,17 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("no ListRepos call", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(ghClient.ListReposCallCount()).To(Equal(0))
 			})
 
 			It("no publish", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 			})
 
 			It("IncPollCycle called with go_version_error", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(metrics.IncPollCycleCallCount()).To(Equal(1))
 				arg := metrics.IncPollCycleArgsForCall(0)
 				Expect(arg).To(Equal("go_version_error"))
@@ -322,7 +322,7 @@ var _ = Describe("watcher", func() {
 					originalBytes, err := os.ReadFile(cursorPath)
 					Expect(err).NotTo(HaveOccurred())
 
-					err = watcher.Poll(context.Background(), false)
+					err = watcher.Poll(context.Background(), false, "")
 					Expect(err).NotTo(HaveOccurred())
 
 					afterBytes, err := os.ReadFile(cursorPath)
@@ -384,7 +384,7 @@ var _ = Describe("watcher", func() {
 				}
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				// Only other-repo was published (disk-status was dropped)
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
@@ -410,7 +410,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("no publish and IncFilterSkipped never called (drop, not a skip verdict)", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 				// AC7 (spec 002): an unparsable .maintainer.yaml is dropped before the
@@ -437,7 +437,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("first poll publishes and records cursor", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 
@@ -450,19 +450,19 @@ var _ = Describe("watcher", func() {
 
 			It("second poll with same HEAD skips (within same watcher)", func() {
 				// First poll: publishes and records cursor
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 
 				// Second poll with same HEAD: skips because cursor recorded this SHA
-				err = watcher.Poll(context.Background(), false)
+				err = watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 				// Second call to PublishCreate was skipped, count stayed at 1
 			})
 
 			It("no temp files in cursor dir", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				// cursorPath is a file; read the parent directory for temp files
 				dir := strings.TrimSuffix(cursorPath, "/cursor.json")
 				entries, err := os.ReadDir(dir)
@@ -496,13 +496,13 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("force=true publishes", func() {
-				err := watcher.Poll(context.Background(), true)
+				err := watcher.Poll(context.Background(), true, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 			})
 
 			It("force=false does not publish", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 			})
@@ -510,7 +510,7 @@ var _ = Describe("watcher", func() {
 			It("force=true still respects consent gate", func() {
 				ghClient.GetMaintainerConfigReturns(filter.RefusedConsent, nil)
 
-				err := watcher.Poll(context.Background(), true)
+				err := watcher.Poll(context.Background(), true, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 				Expect(metrics.IncFilterSkippedCallCount()).To(BeNumerically(">", 0))
@@ -534,25 +534,25 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("does not return an error", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 			})
 
 			It("still runs the cycle", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(metrics.IncPollCycleCallCount()).To(Equal(1))
 			})
 
 			It("preserves the corrupt file", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				saved, err := os.ReadFile(cursorPath + ".corrupt")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(string(saved)).To(Equal("not json"))
 			})
 
 			It("a second cycle also succeeds", func() {
-				Expect(watcher.Poll(context.Background(), false)).To(Succeed())
-				Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+				Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
+				Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 			})
 		})
 
@@ -573,7 +573,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("cursor not updated", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				content, err := os.ReadFile(cursorPath)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(
@@ -582,7 +582,7 @@ var _ = Describe("watcher", func() {
 			})
 
 			It("IncPollCycle success", func() {
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 				Expect(metrics.IncPollCycleCallCount()).To(Equal(1))
 				arg := metrics.IncPollCycleArgsForCall(0)
 				Expect(arg).To(Equal("success"))
@@ -622,7 +622,7 @@ var _ = Describe("watcher", func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 
-				_ = watcher.Poll(ctx, false)
+				_ = watcher.Poll(ctx, false, "")
 				// First repo was processed (publisher was called once for repo1)
 				Expect(publisher.PublishCreateCallCount()).To(BeNumerically("<", 3))
 			})
@@ -652,7 +652,7 @@ var _ = Describe("watcher", func() {
 				publisher.PublishCreateReturns(true)
 				buildWatcher()
 
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 
 				validLabels := map[string]bool{
 					"success":          true,
@@ -678,7 +678,7 @@ var _ = Describe("watcher", func() {
 				}, nil)
 				buildWatcher()
 
-				_ = watcher.Poll(context.Background(), false)
+				_ = watcher.Poll(context.Background(), false, "")
 
 				validLabels := map[string]bool{}
 				for _, reason := range pkg.FilterSkipReasons {
@@ -712,7 +712,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(true, nil)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
@@ -727,7 +727,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(true, nil)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
@@ -758,7 +758,7 @@ var _ = Describe("watcher", func() {
 					ghClient.GetMergedUpdatePRReturns(true, nil)
 					buildWatcher()
 
-					err := watcher.Poll(context.Background(), false)
+					err := watcher.Poll(context.Background(), false, "")
 					Expect(err).NotTo(HaveOccurred())
 
 					Expect(completeSender.SendCommandCallCount()).To(Equal(1))
@@ -777,7 +777,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(false, nil)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
@@ -787,7 +787,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(true, nil)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
 
@@ -802,11 +802,11 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(true, nil)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				// second poll: cursor marks the repo completed, no re-publish
-				err = watcher.Poll(context.Background(), false)
+				err = watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(completeSender.SendCommandCallCount()).To(Equal(1))
@@ -816,7 +816,7 @@ var _ = Describe("watcher", func() {
 				ghClient.GetMergedUpdatePRReturns(false, pkg.ErrRateLimited)
 				buildWatcher()
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
@@ -845,7 +845,7 @@ var _ = Describe("watcher", func() {
 			It("skips a repo with an open update PR and publishes nothing", func() {
 				ghClient.HasOpenUpdatePRReturns(true, nil)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
@@ -855,7 +855,7 @@ var _ = Describe("watcher", func() {
 			It("emits a repo with no open update PR", func() {
 				ghClient.HasOpenUpdatePRReturns(false, nil)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
@@ -864,7 +864,7 @@ var _ = Describe("watcher", func() {
 			It("aborts the cycle when HasOpenUpdatePR is rate limited", func() {
 				ghClient.HasOpenUpdatePRReturns(false, pkg.ErrRateLimited)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
@@ -876,7 +876,7 @@ var _ = Describe("watcher", func() {
 			It("drops the repo on a non-rate-limit HasOpenUpdatePR error and continues", func() {
 				ghClient.HasOpenUpdatePRReturns(false, errors.New("open pr check failed"))
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
@@ -890,7 +890,7 @@ var _ = Describe("watcher", func() {
 			It("applies on forced cycles", func() {
 				ghClient.HasOpenUpdatePRReturns(true, nil)
 
-				err := watcher.Poll(context.Background(), true)
+				err := watcher.Poll(context.Background(), true, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				// Without the gate, force=true would publish.
@@ -922,7 +922,7 @@ var _ = Describe("watcher", func() {
 					headSHA + `","last_seen_go_version":"1.26.6"}}}`
 				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 
@@ -940,7 +940,7 @@ var _ = Describe("watcher", func() {
 				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
 				ghClient.GetMergedUpdatePRReturns(true, nil)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 				Expect(completeSender.SendCommandCallCount()).To(Equal(0))
@@ -952,7 +952,7 @@ var _ = Describe("watcher", func() {
 				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
 				ghClient.GetGoModReturns([]byte("go 1.27.1"), nil)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 				Expect(metrics.IncFilterSkippedArgsForCall(0)).To(Equal("sha_unchanged"))
@@ -962,13 +962,13 @@ var _ = Describe("watcher", func() {
 				seed := `{"repos":{"` + repoKey + `":{"last_seen_head_sha":"` + headSHA + `"}}}`
 				Expect(os.WriteFile(cursorPath, []byte(seed), 0644)).To(Succeed())
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 			})
 
 			It("records the cycle's resolved Go version on a successful publish", func() {
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 				content, err := os.ReadFile(cursorPath)
 				Expect(err).NotTo(HaveOccurred())
@@ -1015,7 +1015,7 @@ var _ = Describe("watcher", func() {
 			It("a successful publish records the claim", func() {
 				publisher.PublishCreateReturns(true)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
@@ -1029,7 +1029,7 @@ var _ = Describe("watcher", func() {
 			It("a failed publish records no claim", func() {
 				publisher.PublishCreateReturns(false)
 
-				err := watcher.Poll(context.Background(), false)
+				err := watcher.Poll(context.Background(), false, "")
 				Expect(err).NotTo(HaveOccurred())
 
 				loaded, err := pkg.LoadCursor(context.Background(), cursorPath)
@@ -1155,7 +1155,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 	It("a live claim suppresses a second emission", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
@@ -1169,7 +1169,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		// The dedup keys must drop too: with LastSeenHeadSHA intact,
 		// SHAUnchangedFilter would suppress this very emission and the branch
@@ -1188,7 +1188,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
 		_, repoKey := terminalClaims.ClearableArgsForCall(0)
@@ -1252,7 +1252,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 			[]string{repoKey},
 		)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
@@ -1262,7 +1262,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(false, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
@@ -1273,7 +1273,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(false, errors.New("store unavailable"))
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
@@ -1296,7 +1296,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		ghClient.HasOpenUpdatePRReturnsOnCall(0, false, nil)
 		ghClient.HasOpenUpdatePRReturnsOnCall(1, false, pkg.ErrRateLimited)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(terminalClaims.ClearableCallCount()).To(Equal(1))
 		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
@@ -1307,7 +1307,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		terminalClaims.ClearableReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		// With repo keying, markPublished always re-arms the same key it cleared,
 		// so a successful publish never consumes: there is nothing left to spend,
@@ -1327,7 +1327,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		ghClient.GetHeadSHAReturns(oldSHA, nil)
 		terminalClaims.ClearableReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0),
 			"an identity-identical re-emit files nothing, so it is not published")
@@ -1345,7 +1345,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		// The defect was a state that repeats every poll interval, so one cycle
 		// cannot show it is gone. A second cycle must still not publish, not re-arm
 		// and not clear again.
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
 		Expect(terminalClaims.ConsumeCallCount()).To(Equal(1))
@@ -1361,7 +1361,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		ghClient.GetHeadSHAReturns(oldSHA, nil)
 		terminalClaims.ClearableReturns(false, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
@@ -1381,7 +1381,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 			`"completed_head_sha":"` + oldSHA + `"}`)
 		ghClient.GetHeadSHAReturns(oldSHA, nil)
 
-		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), true, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(terminalClaims.RearmCallCount()).To(Equal(0))
@@ -1405,7 +1405,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		// run and be observed. That is the case a re-arm is for.
 		terminalClaims.ClearableReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(terminalClaims.RearmCallCount()).To(Equal(1))
 		Expect(terminalClaims.ConsumeCallCount()).To(Equal(0),
@@ -1416,7 +1416,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(terminalClaims.ClearableCallCount()).To(Equal(0))
 	})
@@ -1425,7 +1425,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go 1.27.2"), nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(readRepoState().InFlightTarget).To(BeEmpty())
 		Expect(readRepoState().InFlightSince).To(BeEmpty())
@@ -1438,7 +1438,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go 1.28"), nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(readRepoState().InFlightTarget).To(BeEmpty())
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
@@ -1449,7 +1449,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.GetGoModReturns([]byte("go banana"), nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(readRepoState().InFlightTarget).To(BeEmpty())
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
@@ -1460,7 +1460,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.HasOpenUpdatePRReturns(true, nil)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(filterSkippedValue("open_update_pr")).To(Equal(1.0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(0.0))
@@ -1473,7 +1473,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(since))
 		ghClient.HasOpenUpdatePRReturns(false, errors.New("open pr check failed"))
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
@@ -1485,17 +1485,17 @@ var _ = Describe("emission claim (spec 005)", func() {
 	It("the TTL re-arms the emission", func() {
 		writeCursorState(claimState(now().Add(-(pkg.InFlightTTL + libtime.Hour))))
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
 	})
 
 	It("a repo with no claim still emits, and does not emit twice", func() {
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
 	})
@@ -1503,7 +1503,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 	It("a forced cycle does not bypass the claim", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 
-		Expect(watcher.Poll(context.Background(), true)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), true, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(filterSkippedValue("emission_in_flight")).To(Equal(1.0))
@@ -1516,7 +1516,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 				now().Add(-libtime.Hour).Format(time.RFC3339) + `"}`,
 		)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))
@@ -1528,7 +1528,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 				`"in_flight_target":"1.27.2","in_flight_since":"not-a-timestamp"}`,
 		)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(1))
 		Expect(readRepoState().InFlightSince).To(Equal(now().Format(time.RFC3339)))
@@ -1538,7 +1538,7 @@ var _ = Describe("emission claim (spec 005)", func() {
 		writeCursorState(claimState(now().Add(-libtime.Hour)))
 		ghClient.HasOpenUpdatePRReturns(false, pkg.ErrRateLimited)
 
-		Expect(watcher.Poll(context.Background(), false)).To(Succeed())
+		Expect(watcher.Poll(context.Background(), false, "")).To(Succeed())
 
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(readRepoState().InFlightTarget).To(Equal("1.27.2"))

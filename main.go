@@ -134,7 +134,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		terminalClaims,
 	)
 	gate := pkg.NewCycleGate()
-	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate)
+	a.TriggerHandler = factory.CreateTriggerHandler(ctx, w, gate, currentDateTime)
 
 	glog.V(2).Infof(
 		"github-update-go-watcher starting stage=%s owner=%s interval=%s cursor=%s listen=%s",
@@ -143,7 +143,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	return service.Run(
 		ctx,
-		a.pollLoop(w, gate, pollInterval),
+		a.pollLoop(w, gate, pollInterval, currentDateTime),
 		a.createHTTPServer(sentryClient),
 		// Consumes the task lifecycle event stream and records identifiers whose
 		// task can no longer progress, so a failed emission stops suppressing its
@@ -157,6 +157,7 @@ func (a *application) pollLoop(
 	w pkg.Watcher,
 	gate pkg.CycleGate,
 	interval time.Duration,
+	currentDateTime libtime.CurrentDateTimeGetter,
 ) run.Func {
 	poll := func(ctx context.Context) {
 		if !gate.TryAcquire() {
@@ -164,7 +165,11 @@ func (a *application) pollLoop(
 			return
 		}
 		defer gate.Release()
-		if err := w.Poll(ctx, false); err != nil {
+		// The real UTC calendar month is passed on every cycle: the month gate
+		// makes the first cycle of a month emit and every later cycle in that
+		// month a no-op, so no separate monthly trigger is needed.
+		month := currentDateTime.Now().Format("2006-01")
+		if err := w.Poll(ctx, false, month); err != nil {
 			glog.Errorf("poll: %v", err)
 		}
 	}

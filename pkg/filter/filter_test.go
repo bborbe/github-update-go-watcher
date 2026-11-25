@@ -254,6 +254,14 @@ var _ = Describe("SHAUnchangedFilter", func() {
 type fakeCursor struct {
 	shas       map[string]string
 	goVersions map[string]string
+	months     map[string]string
+}
+
+func (f *fakeCursor) LastMonthlyMonth(repoKey string) string {
+	if f.months == nil {
+		return ""
+	}
+	return f.months[repoKey]
 }
 
 func (f *fakeCursor) LastSeenSHA(repoKey string) string {

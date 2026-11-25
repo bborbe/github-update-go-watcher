@@ -8,6 +8,17 @@ import (
 )
 
 type CursorReader struct {
+	LastMonthlyMonthStub        func(string) string
+	lastMonthlyMonthMutex       sync.RWMutex
+	lastMonthlyMonthArgsForCall []struct {
+		arg1 string
+	}
+	lastMonthlyMonthReturns struct {
+		result1 string
+	}
+	lastMonthlyMonthReturnsOnCall map[int]struct {
+		result1 string
+	}
 	LastSeenGoVersionStub        func(string) string
 	lastSeenGoVersionMutex       sync.RWMutex
 	lastSeenGoVersionArgsForCall []struct {
@@ -32,6 +43,67 @@ type CursorReader struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *CursorReader) LastMonthlyMonth(arg1 string) string {
+	fake.lastMonthlyMonthMutex.Lock()
+	ret, specificReturn := fake.lastMonthlyMonthReturnsOnCall[len(fake.lastMonthlyMonthArgsForCall)]
+	fake.lastMonthlyMonthArgsForCall = append(fake.lastMonthlyMonthArgsForCall, struct {
+		arg1 string
+	}{arg1})
+	stub := fake.LastMonthlyMonthStub
+	fakeReturns := fake.lastMonthlyMonthReturns
+	fake.recordInvocation("LastMonthlyMonth", []interface{}{arg1})
+	fake.lastMonthlyMonthMutex.Unlock()
+	if stub != nil {
+		return stub(arg1)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *CursorReader) LastMonthlyMonthCallCount() int {
+	fake.lastMonthlyMonthMutex.RLock()
+	defer fake.lastMonthlyMonthMutex.RUnlock()
+	return len(fake.lastMonthlyMonthArgsForCall)
+}
+
+func (fake *CursorReader) LastMonthlyMonthCalls(stub func(string) string) {
+	fake.lastMonthlyMonthMutex.Lock()
+	defer fake.lastMonthlyMonthMutex.Unlock()
+	fake.LastMonthlyMonthStub = stub
+}
+
+func (fake *CursorReader) LastMonthlyMonthArgsForCall(i int) string {
+	fake.lastMonthlyMonthMutex.RLock()
+	defer fake.lastMonthlyMonthMutex.RUnlock()
+	argsForCall := fake.lastMonthlyMonthArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *CursorReader) LastMonthlyMonthReturns(result1 string) {
+	fake.lastMonthlyMonthMutex.Lock()
+	defer fake.lastMonthlyMonthMutex.Unlock()
+	fake.LastMonthlyMonthStub = nil
+	fake.lastMonthlyMonthReturns = struct {
+		result1 string
+	}{result1}
+}
+
+func (fake *CursorReader) LastMonthlyMonthReturnsOnCall(i int, result1 string) {
+	fake.lastMonthlyMonthMutex.Lock()
+	defer fake.lastMonthlyMonthMutex.Unlock()
+	fake.LastMonthlyMonthStub = nil
+	if fake.lastMonthlyMonthReturnsOnCall == nil {
+		fake.lastMonthlyMonthReturnsOnCall = make(map[int]struct {
+			result1 string
+		})
+	}
+	fake.lastMonthlyMonthReturnsOnCall[i] = struct {
+		result1 string
+	}{result1}
 }
 
 func (fake *CursorReader) LastSeenGoVersion(arg1 string) string {

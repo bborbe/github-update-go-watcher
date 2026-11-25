@@ -513,7 +513,7 @@ var _ = Describe("staleIgnorePass", func() {
 			osvClient,
 			allowlist,
 		)
-		Expect(w.Poll(ctx, false)).To(Succeed())
+		Expect(w.Poll(ctx, false, "")).To(Succeed())
 		Expect(publisher.PublishStaleIgnoreCallCount()).To(Equal(1))
 		Expect(publisher.PublishCreateCallCount()).To(Equal(0))
 		Expect(metricValue(reg, "github_update_go_watcher_poll_cycle_total", "result", "success")).

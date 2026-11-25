@@ -19,6 +19,10 @@ import (
 // the caller records the repo's HEAD in the cursor only on true.
 type TaskPublisher interface {
 	PublishCreate(ctx context.Context, candidate Candidate) bool
+	// PublishMonthly builds and sends the monthly full-update CreateTaskCommand
+	// for month (YYYY-MM). Returns true only on a successful send — the caller
+	// records the month in the cursor only on true.
+	PublishMonthly(ctx context.Context, candidate Candidate, month string) bool
 	PublishDecision(ctx context.Context, candidate Candidate) bool
 	// PublishStaleIgnore builds and sends the stale-ignore CreateTaskCommand.
 	// Returns true only on a successful send — the caller records the emission
@@ -69,6 +73,36 @@ func (p *taskPublisher) PublishCreate(
 	glog.V(2).Infof(
 		"published CreateTaskCommand repo=%s sha=%s taskID=%s stage=%s",
 		candidate.Repo.Key(),
+		candidate.HeadSHA,
+		string(cmd.TaskIdentifier),
+		p.cfg.Stage,
+	)
+	p.metrics.IncPublished("create")
+	return true
+}
+
+func (p *taskPublisher) PublishMonthly(
+	ctx context.Context,
+	candidate Candidate,
+	month string,
+) bool {
+	cmd := BuildMonthlyCreateCommand(candidate, p.cfg, month)
+	if err := p.sender.SendCommand(ctx, cmd); err != nil {
+		glog.Errorf(
+			"publish monthly create-task failed repo=%s month=%s sha=%s taskID=%s err=%v",
+			candidate.Repo.Key(),
+			month,
+			candidate.HeadSHA,
+			string(cmd.TaskIdentifier),
+			err,
+		)
+		p.metrics.IncPublished("error")
+		return false
+	}
+	glog.V(2).Infof(
+		"published monthly CreateTaskCommand repo=%s month=%s sha=%s taskID=%s stage=%s",
+		candidate.Repo.Key(),
+		month,
 		candidate.HeadSHA,
 		string(cmd.TaskIdentifier),
 		p.cfg.Stage,

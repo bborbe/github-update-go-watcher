@@ -14,6 +14,9 @@ type CursorReader interface {
 	// LastSeenGoVersion returns the recorded target Go version for repoKey, or
 	// "" if unseen — or if the entry predates the field.
 	LastSeenGoVersion(repoKey string) string
+	// LastMonthlyMonth returns the calendar month (YYYY-MM) for which repoKey's
+	// monthly full-update task was last published, or "" if unseen.
+	LastMonthlyMonth(repoKey string) string
 }
 
 // NewSHAUnchangedFilter returns "sha_unchanged" when Candidate.HeadSHA and

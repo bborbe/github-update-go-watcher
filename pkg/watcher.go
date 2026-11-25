@@ -29,7 +29,13 @@ type Watcher interface {
 	// whose HEAD has not moved are re-evaluated. Every other gate (allowlist,
 	// go.mod presence, parsability, version comparison, opt-in consent) still
 	// applies. The interval loop always passes false.
-	Poll(ctx context.Context, force bool) error
+	//
+	// month, when non-empty (YYYY-MM), additionally runs the monthly pass over
+	// the same candidates: every repo passing the allowlist, go.mod and consent
+	// gates is emitted once for that month regardless of Go version or HEAD
+	// movement, and skipped with "month_unchanged" on a later cycle in the same
+	// month. An empty month preserves the pre-existing behaviour exactly.
+	Poll(ctx context.Context, force bool, month string) error
 }
 
 // NewWatcher wires the cycle's collaborators.
@@ -68,6 +74,7 @@ func NewWatcher(
 		taskCreationFilter:    taskCreationFilter,
 		currentDateTimeGetter: currentDateTimeGetter,
 		terminalClaims:        terminalClaims,
+		allowlist:             allowlist,
 		staleIgnorePass: NewStaleIgnorePass(
 			ghClient,
 			osvClient,
@@ -91,13 +98,16 @@ type watcher struct {
 	currentDateTimeGetter libtime.CurrentDateTimeGetter
 	terminalClaims        TerminalClaims
 	staleIgnorePass       StaleIgnorePass
+	// allowlist is retained so the monthly pass can build its own chain per
+	// cycle (the monthly gate needs a fresh CursorReader).
+	allowlist []string
 	// pendingTerminalConsume holds the task identifiers this cycle cleared a
 	// claim for. Their entitlements are spent only after the cursor save
 	// succeeds — see consumePending.
 	pendingTerminalConsume []string
 }
 
-func (w *watcher) Poll(ctx context.Context, force bool) error {
+func (w *watcher) Poll(ctx context.Context, force bool, month string) error {
 	w.pendingTerminalConsume = nil
 	cursorState, err := LoadCursor(ctx, w.cursorPath)
 	if err != nil {
@@ -140,7 +150,7 @@ func (w *watcher) Poll(ctx context.Context, force bool) error {
 		)
 	}
 
-	abortReason := w.processRepos(ctx, cursorState, repos, cycleFilter, latestGo)
+	abortReason := w.processRepos(ctx, cursorState, repos, cycleFilter, latestGo, month)
 	if abortReason != "" {
 		w.metrics.IncPollCycle(abortReason)
 		return nil
@@ -205,6 +215,7 @@ func (w *watcher) processRepos(
 	repos []Repo,
 	cycleFilter filter.TaskCreationFilter,
 	latestGo Version,
+	month string,
 ) string {
 	for _, repo := range repos {
 		select {
@@ -224,6 +235,12 @@ func (w *watcher) processRepos(
 		if dropped {
 			continue
 		}
+
+		// Monthly pass runs before the Go-version gates: a monthly task is
+		// independent of the repo's Go version, of HEAD movement, and of the
+		// Go-version emission claim / open update PR. It keeps only the
+		// allowlist, go.mod and consent gates plus its own month gate.
+		w.runMonthlyPass(ctx, cursorState, repo, candidate, month)
 
 		abortReason, skip := w.gateRepo(ctx, cursorState, repo, candidate)
 		if abortReason != "" {
@@ -268,6 +285,51 @@ func (w *watcher) processRepos(
 	return ""
 }
 
+// runMonthlyPass evaluates and, on pass, emits the monthly task for one repo.
+// It is a no-op when month is empty (the pre-existing cycle).
+func (w *watcher) runMonthlyPass(
+	ctx context.Context,
+	cursorState *Cursor,
+	repo Repo,
+	candidate Candidate,
+	month string,
+) {
+	if month == "" {
+		return
+	}
+	if reason := w.monthlySkipReason(cursorState, candidate, month); reason != "" {
+		w.metrics.IncFilterSkipped(reason)
+		glog.V(2).Infof(
+			"repo skipped repo=%s reason=%s month=%s",
+			repo.Key(),
+			reason,
+			month,
+		)
+		return
+	}
+	if w.publisher.PublishMonthly(ctx, candidate, month) {
+		cursorState.SetLastMonthlyMonth(repo.Key(), month)
+	}
+}
+
+// monthlySkipReason returns the first non-empty skip reason from the monthly
+// chain, or "" when the repo should be emitted for month. The chain is built
+// per cycle because the month gate reads the fresh cursor state.
+func (w *watcher) monthlySkipReason(
+	cursorState *Cursor,
+	candidate Candidate,
+	month string,
+) string {
+	chain := filter.TaskCreationFilterList{
+		filter.NewRepoAllowlistFilter(w.allowlist),
+		filter.NewGoModPresentFilter(),
+		filter.NewGoModParsableFilter(),
+		filter.NewAutoUpdateFilter(),
+		filter.NewMonthUnchangedFilter(NewCursorReader(cursorState), month),
+	}
+	return chain.Skip(candidate.FilterCandidate())
+}
+
 // markPublished records a successful publish in the cursor: the repo's HEAD,
 // the cycle's resolved target Go version (the same value the emitted task
 // carries as latest_go, so the recorded key and the filed identifier agree by
@@ -289,8 +351,10 @@ func (w *watcher) markPublished(
 	}
 	previous := cursorState.Repos[repo.Key()]
 	var completedHeadSHA string
+	var lastMonthlyMonth string
 	if previous != nil {
 		completedHeadSHA = previous.CompletedHeadSHA
+		lastMonthlyMonth = previous.LastMonthlyMonth
 	}
 	// An emission identical to the one the cursor already records cannot produce a
 	// new record WHILE THAT RECORD STILL EXISTS: the identifier derives from
@@ -315,6 +379,7 @@ func (w *watcher) markPublished(
 		LastSeenHeadSHA:   candidate.HeadSHA,
 		LastSeenGoVersion: candidate.LatestGo.Number(),
 		CompletedHeadSHA:  completedHeadSHA,
+		LastMonthlyMonth:  lastMonthlyMonth,
 	}
 	if !identityNoop {
 		state.InFlightTarget = candidate.LatestGo.Number()

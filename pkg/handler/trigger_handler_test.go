@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -30,7 +31,7 @@ var _ = Describe("TriggerHandler", func() {
 		watcherFake = &fakeWatcher{calls: make(chan fakeCall, 10)}
 		gate = pkg.NewCycleGate()
 		baseCtx = context.Background()
-		th = handler.NewTriggerHandler(baseCtx, watcherFake, gate)
+		th = handler.NewTriggerHandler(baseCtx, watcherFake, gate, libtime.NewCurrentDateTime())
 	})
 
 	It("POST /trigger returns 202 and body contains accepted", func() {
@@ -112,13 +113,14 @@ var _ = Describe("TriggerHandler", func() {
 type fakeCall struct {
 	ctx   context.Context
 	force bool
+	month string
 }
 
 type fakeWatcher struct {
 	calls chan fakeCall
 }
 
-func (w *fakeWatcher) Poll(ctx context.Context, force bool) error {
-	w.calls <- fakeCall{ctx: ctx, force: force}
+func (w *fakeWatcher) Poll(ctx context.Context, force bool, month string) error {
+	w.calls <- fakeCall{ctx: ctx, force: force, month: month}
 	return nil
 }
