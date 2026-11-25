@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.14.0
 
 - feat: emit one monthly full dependency-update task per consent-granted repo, regardless of Go version or HEAD movement (`update_month` frontmatter, month-keyed task identity, `month_unchanged` skip reason, `POST /trigger?monthly=1&month=YYYY-MM`)
 
