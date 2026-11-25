@@ -62,6 +62,7 @@ var (
 		"sha_unchanged",
 		"open_update_pr",
 		"emission_in_flight",
+		"month_unchanged",
 	}
 	IgnoreScanResults = []string{
 		"scanned",

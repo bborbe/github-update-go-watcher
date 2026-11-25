@@ -29,6 +29,10 @@ Detection is deliberately shallow: fetch `go.mod` via the GitHub contents API an
 
 Full dependency and vulnerability determination is the agent's job — it clones anyway during planning, and closes a repo as a no-op when there is nothing to change. A repo that is current on Go but has stale deps is reached on demand via `/github-update-go-repo-trigger <owner/repo>`; the cheap fleet signal cannot see that without cloning — with one exception, the **stale ignore**: an advisory OSV has withdrawn is visible from the repo's ignore files alone, and is detected by the [stale-ignore signal](#stale-ignore-signal).
 
+## Monthly full update
+
+Independently of the Go-version signal, the watcher runs a monthly pass: every repo that passes the allowlist, `go.mod` and consent gates receives one `github-update-go` task per calendar month, whether or not its Go directive is current and whether or not its HEAD moved. The pass runs inside the existing poll cycle (first cycle of the month emits, later cycles skip with `month_unchanged`) and can be forced with `POST /trigger?monthly=1&month=YYYY-MM`. Each monthly task carries `update_month: <YYYY-MM>` frontmatter and a month-keyed identifier, so a re-emit in the same month is a downstream no-op. The Go-version pass is unchanged.
+
 ## Stale-ignore signal
 
 This is the watcher's **second, independent signal**. The first is "declared Go version behind stable"; this one is "an ignore suppresses an advisory that no longer exists". Both cause `github-update-go-agent` to open a repo-modifying PR, so both honour the same [two gates](#scope--two-gates-both-must-pass) — the operator allowlist and `goUpdate.autoUpdate: true`. A repo that has refused consent is never auto-cleaned, so a Go-current repo with consent refused keeps its stale ignore until an operator clears it by hand. That is a deliberate limitation, not an oversight.
@@ -105,6 +109,7 @@ All metrics are prefixed with `github_update_go_watcher_`.
 | `sha_unchanged` | Repo HEAD SHA and target Go version are both unchanged since the last successful cycle (not evaluated on forced cycles). Also the fall-through for a claim cleared against a non-progressing record at an unchanged HEAD: the re-emit would be identity-identical, so the repo keeps its dedup key and is skipped here rather than re-emitted for nothing |
 | `open_update_pr` | Repo has an open `fix/update-go-*` pull request — an update is already in flight, so no new task is emitted (always-on gate, spec 003) |
 | `emission_in_flight` | Repo was already emitted for the current target Go version and none of the four clearing events has occurred (convergence, an open `fix/update-go-*` PR, the 14-day backstop, or the emitted task no longer being able to progress — terminal, or parked at `human_review`). Evaluated before the filter chain, so a claimed repo reports this reason rather than `sha_unchanged` |
+| `month_unchanged` | Monthly pass only: the repo's monthly full-update task was already emitted for this calendar month. The monthly pass ignores the Go version and HEAD movement, so this is the only gate that stops a second emission in the same month |
 
 ## Emitted task contract
 
@@ -176,7 +181,7 @@ The move is safe and permanent — a later identity-identical re-emit does not t
 | `/healthz` | GET | Liveness probe — always 200 OK |
 | `/readiness` | GET | Readiness probe — always 200 OK |
 | `/metrics` | GET | Prometheus scrape endpoint |
-| `/trigger` | POST | Force an immediate poll cycle. `?force=<bool>` (default false) controls whether SHA-unchanged repos are re-evaluated. Returns 202 Accepted or 409 Conflict if a cycle is already running |
+| `/trigger` | POST | Force an immediate poll cycle. `?force=<bool>` (default false) controls whether SHA-unchanged repos are re-evaluated. `?monthly=1` additionally runs the monthly pass; `&month=YYYY-MM` overrides the month (UTC, default the current month, bounded to current ± 1 — anything else is 400). Returns 202 Accepted or 409 Conflict if a cycle is already running |
 | `/setloglevel/{level}` | GET | Raise glog verbosity to `level`, auto-resets after 5 minutes |
 | `/gc` | GET | Trigger Go garbage collection |
 | `/testloglevel` | GET | Emit test log lines at every verbosity level |

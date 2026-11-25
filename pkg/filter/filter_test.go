@@ -284,6 +284,7 @@ var _ = Describe("Closed set assertion", func() {
 			"go_current":           true,
 			"auto_update_disabled": true,
 			"sha_unchanged":        true,
+			"month_unchanged":      true,
 		}
 		candidate := filter.Candidate{
 			RepoKey:       "github.com/bborbe/repo",
@@ -300,6 +301,7 @@ var _ = Describe("Closed set assertion", func() {
 			filter.NewGoBehindFilter(),
 			filter.NewAutoUpdateFilter(),
 			filter.NewSHAUnchangedFilter(&fakeCursor{}),
+			filter.NewMonthUnchangedFilter(&fakeCursor{}, "2026-11"),
 		}
 		for _, f := range filters {
 			reason := f.Skip(candidate)
