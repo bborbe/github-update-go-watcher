@@ -8,7 +8,7 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
-## Unreleased
+## v0.14.1
 
 - fix: carry the monthly task's month in the title (`Monthly Deps Update <owner>-<repo> <YYYY-MM>`) and in the month-keyed identifier instead of `update_month` frontmatter. The task store rejects unknown frontmatter keys — `400 {"error":"unknown_field","field":"update_month"}` — so every emitted monthly task was dropped at the controller (measured on dev, 2026-11-25, task `bborbe-go-skeleton 2026-11`). Dedup never depended on the field: it is the cursor's `last_monthly_month` plus the month-keyed identifier.
 
