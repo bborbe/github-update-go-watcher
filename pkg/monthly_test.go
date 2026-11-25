@@ -161,10 +161,12 @@ var _ = Describe("monthly task builder", func() {
 		}
 	})
 
-	It("carries update_month and the month-keyed identifier", func() {
+	It("carries the month in the title and the month-keyed identifier", func() {
 		cmd := pkg.BuildMonthlyCreateCommand(candidate, pkg.TaskConfig{Stage: "dev"}, "2026-11")
 
-		Expect(cmd.Frontmatter["update_month"]).To(Equal("2026-11"))
+		// The month rides in the title and the identifier, never in frontmatter:
+		// the task store rejects unknown frontmatter keys (400 unknown_field).
+		Expect(cmd.Frontmatter).NotTo(HaveKey("update_month"))
 		Expect(cmd.Frontmatter["task_type"]).To(Equal("github-update-go"))
 		Expect(string(cmd.TaskIdentifier)).To(Equal(
 			pkg.DeriveMonthlyTaskID("bborbe", "disk-status", "2026-11").String(),

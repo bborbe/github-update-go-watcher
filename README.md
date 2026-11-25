@@ -31,7 +31,7 @@ Full dependency and vulnerability determination is the agent's job — it clones
 
 ## Monthly full update
 
-Independently of the Go-version signal, the watcher runs a monthly pass: every repo that passes the allowlist, `go.mod` and consent gates receives one `github-update-go` task per calendar month, whether or not its Go directive is current and whether or not its HEAD moved. The pass runs inside the existing poll cycle (first cycle of the month emits, later cycles skip with `month_unchanged`) and can be forced with `POST /trigger?monthly=1&month=YYYY-MM`. Each monthly task carries `update_month: <YYYY-MM>` frontmatter and a month-keyed identifier, so a re-emit in the same month is a downstream no-op. The Go-version pass is unchanged.
+Independently of the Go-version signal, the watcher runs a monthly pass: every repo that passes the allowlist, `go.mod` and consent gates receives one `github-update-go` task per calendar month, whether or not its Go directive is current and whether or not its HEAD moved. The pass runs inside the existing poll cycle (first cycle of the month emits, later cycles skip with `month_unchanged`) and can be forced with `POST /trigger?monthly=1&month=YYYY-MM`. Each monthly task names its month in the title (`Monthly Deps Update <owner>-<repo> <YYYY-MM>`) and carries a month-keyed identifier, so a re-emit in the same month is a downstream no-op. The month deliberately rides in the title and the identifier rather than a frontmatter field: the task store rejects unknown frontmatter keys with `400 unknown_field`. The Go-version pass is unchanged.
 
 ## Stale-ignore signal
 
