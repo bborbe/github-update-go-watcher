@@ -4,7 +4,20 @@
 
 package pkg
 
-import "net/url"
+import (
+	"net/http"
+	"net/url"
+)
+
+// NewGitHubClientWithLogForTest builds the production client chain with an
+// injectable non-2xx log sink. Test-only.
+func NewGitHubClientWithLogForTest(
+	httpClient *http.Client,
+	apiBaseURL string,
+	log func(string),
+) GitHubClient {
+	return newGitHubClient(httpClient, apiBaseURL, log)
+}
 
 // SetBaseURL points c at a test server. Test-only.
 func SetBaseURL(c GitHubClient, raw string) error {

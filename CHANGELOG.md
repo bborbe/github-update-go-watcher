@@ -12,6 +12,12 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 
 - feat: emit one monthly full dependency-update task per consent-granted repo, regardless of Go version or HEAD movement (`update_month` frontmatter, month-keyed task identity, `month_unchanged` skip reason, `POST /trigger?monthly=1&month=YYYY-MM`)
 
+## v0.13.0
+
+- fix: Retry GitHub rate-limit responses with the server's requested delay instead of aborting the poll cycle, and bound concurrent GitHub requests at 4 so retries cannot worsen a secondary limit
+- feat: Add `GITHUB_API_BASE_URL` to point the watcher at a test server or a GitHub Enterprise API root
+- chore: Bump `github.com/bborbe/http` to v1.28.0
+
 ## v0.12.1
 
 - chore: remove 8 stale vulnerability ignore IDs
