@@ -8,6 +8,10 @@ Please choose versions by [Semantic Versioning](http://semver.org/).
 * MINOR version when you add functionality in a backwards-compatible manner, and
 * PATCH version when you make backwards-compatible bug fixes.
 
+## Unreleased
+
+- chore: update github.com/IBM/sarama to v1.62.0, github.com/bborbe/agent to v0.149.0, github.com/bborbe/collection to v1.21.9, github.com/bborbe/cqrs to v0.6.18, github.com/bborbe/errors to v1.7.1, github.com/bborbe/http to v1.28.1, github.com/bborbe/kafka to v1.30.4, github.com/bborbe/kv to v1.21.31, github.com/bborbe/log to v1.7.10, github.com/bborbe/maintainer to v0.52.1, github.com/bborbe/metrics to v0.6.15, github.com/bborbe/run to v1.13.0, github.com/bborbe/sentry to v1.11.1, github.com/bborbe/service to v1.12.2, github.com/bborbe/time to v1.27.30, github.com/bborbe/validation to v1.5.12, github.com/bborbe/vault-cli to v0.200.6
+
 ## v0.14.1
 
 - fix: carry the monthly task's month in the title (`Monthly Deps Update <owner>-<repo> <YYYY-MM>`) and in the month-keyed identifier instead of `update_month` frontmatter. The task store rejects unknown frontmatter keys — `400 {"error":"unknown_field","field":"update_month"}` — so every emitted monthly task was dropped at the controller (measured on dev, 2026-11-25, task `bborbe-go-skeleton 2026-11`). Dedup never depended on the field: it is the cursor's `last_monthly_month` plus the month-keyed identifier.
